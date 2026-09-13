@@ -1,0 +1,13 @@
+<%- include('../partials/head') %>
+<h1>My account</h1>
+<dl><dt>Name</dt><dd><%= user.name %></dd><dt>Email</dt><dd><%= user.email %></dd><dt>Role</dt><dd><%= roleLabels[user.role] %></dd></dl>
+<h2>Change password</h2>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<form method="post" action="/account/password" style="max-width:420px">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <label>Current password</label><input type="password" name="current" required autocomplete="current-password">
+  <label>New password (12+ characters, letters and numbers)</label><input type="password" name="password" required autocomplete="new-password">
+  <label>Confirm new password</label><input type="password" name="confirm" required autocomplete="new-password">
+  <p><button type="submit">Change password</button></p>
+</form>
+<%- include('../partials/foot') %>

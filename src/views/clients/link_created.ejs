@@ -1,0 +1,7 @@
+<%- include('../partials/head') %>
+<h1>Returning-client link for <%= client.legal_name %></h1>
+<p>Send this link to the client. It is shown <strong>once</strong> — it is stored hashed and cannot be displayed again. Expires <%= new Date(created.link.expires_at).toUTCString() %>.</p>
+<p class="link-box mono"><%= created.url %></p>
+<p>Before seeing any data the client must enter the last 4 digits of their SSN and their date of birth. After 5 failed attempts the link is locked.</p>
+<p><a class="btn" href="/clients/<%= client.id %>#portal">Back to client</a></p>
+<%- include('../partials/foot') %>

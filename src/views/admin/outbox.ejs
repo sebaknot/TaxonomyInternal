@@ -1,0 +1,7 @@
+<%- include('../partials/head') %>
+<h1>Email outbox</h1>
+<p class="muted"><%= smtpConfigured ? 'SMTP is configured; messages are delivered and recorded here.' : 'SMTP is not configured: messages are recorded here only and NOT delivered. Configure SMTP_* in .env to send email.' %></p>
+<table><thead><tr><th>When (UTC)</th><th>To</th><th>Subject</th><th>Delivered</th></tr></thead><tbody>
+<% for (const e of emails) { %><tr><td><%= e.ts %></td><td><%= e.to_addr %></td><td><a href="/admin/outbox/<%= e.id %>"><%= e.subject %></a></td><td><%= e.sent_at || (e.error ? 'ERROR: ' + e.error : 'not sent (no SMTP)') %></td></tr><% } %>
+</tbody></table>
+<%- include('../partials/foot') %>

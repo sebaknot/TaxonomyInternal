@@ -1,0 +1,26 @@
+<%- include('../partials/head') %>
+<h1><%= title %></h1>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<form method="post" action="/portal/update/<%= section %>" style="max-width:520px">
+<input type="hidden" name="_csrf" value="<%= csrfToken %>">
+<% if (section === 'contact') { %>
+  <label>Phone</label><input type="tel" name="phone" value="<%= client.phone || '' %>">
+  <label>Email</label><input type="email" name="email" value="<%= client.email || '' %>">
+  <label>Street address</label><input type="text" name="address_line1" value="<%= client.address_line1 || '' %>">
+  <label>Apt / unit</label><input type="text" name="address_line2" value="<%= client.address_line2 || '' %>">
+  <label>City</label><input type="text" name="city" value="<%= client.city || '' %>">
+  <label>State</label><input type="text" name="state" value="<%= client.state || '' %>">
+  <label>ZIP</label><input type="text" name="zip" value="<%= client.zip || '' %>">
+<% } else if (section === 'personal') { %>
+  <label>Legal name</label><input type="text" name="legal_name" value="<%= client.legal_name || '' %>" required>
+  <label>Preferred name</label><input type="text" name="preferred_name" value="<%= client.preferred_name || '' %>">
+  <p class="muted">To change your date of birth or SSN, please contact us directly.</p>
+<% } else if (section === 'filing') { %>
+  <label>Filing status</label><select name="filing_status"><option value="">—</option><% for (const s of constants.FILING_STATUSES) { %><option <%= client.filing_status === s ? 'selected' : '' %>><%= s %></option><% } %></select>
+  <label>Spouse name</label><input type="text" name="spouse_name" value="<%= client.spouse_name || '' %>">
+  <label>Spouse SSN <small class="help">(leave blank to keep what's on file)</small></label><input type="text" name="spouse_ssn" inputmode="numeric" autocomplete="off">
+  <label>Spouse date of birth</label><input type="date" name="spouse_dob" value="<%= client.spouse_dob || '' %>">
+<% } %>
+<p><button type="submit">Save changes</button> <a class="btn secondary" href="/portal/home">Cancel</a></p>
+</form>
+<%- include('../partials/foot') %>

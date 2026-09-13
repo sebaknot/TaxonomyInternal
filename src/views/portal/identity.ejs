@@ -1,0 +1,12 @@
+<%- include('../partials/head') %>
+<h1>Welcome to <%= firmName %></h1>
+<p>Let's start with a few details so we know who you are. You'll complete the full intake form on the next page.</p>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<form method="post" action="/portal/identity" style="max-width:420px">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <label>Full legal name</label><input type="text" name="name" required value="<%= form.name || '' %>" autofocus>
+  <label>Email</label><input type="email" name="email" required value="<%= form.email || '' %>">
+  <label>Phone</label><input type="tel" name="phone" required value="<%= form.phone || '' %>">
+  <p><button type="submit">Continue</button></p>
+</form>
+<%- include('../partials/foot') %>

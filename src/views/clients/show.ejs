@@ -1,0 +1,157 @@
+<%- include('../partials/head') %>
+<% const fmtTs = (t) => t ? String(t).replace('T',' ').replace(/\.\d+Z$/,' UTC') : ''; %>
+<h1><%= client.legal_name %> <% if (client.preferred_name) { %><span class="muted">(“<%= client.preferred_name %>”)</span><% } %></h1>
+<nav class="sub">
+  <% if (can.editClientCore(user)) { %><a class="btn" href="/clients/<%= client.id %>/edit">Edit</a><% } %>
+  <a href="#dependents">Dependents</a> <a href="#history">History</a> <a href="#vault">Documents</a> <a href="#portal">Portal</a> <a href="#activity">Activity</a> <a href="/clients/<%= client.id %>/audit">Full audit trail</a>
+</nav>
+<div class="grid">
+<div class="card">
+  <h3>Identity</h3>
+  <dl>
+    <dt>SSN</dt><dd><span id="ssn" class="mono"><%= maskSsn(client.ssn_last4) %></span> <% if (can.revealSsn(user) && client.ssn_last4) { %><button class="secondary" data-reveal-ssn="/clients/<%= client.id %>/ssn/reveal" data-which="client" data-target="ssn">Reveal</button><% } %></dd>
+    <dt>Date of birth</dt><dd><%= sensitive ? (client.dob || '—') : (client.dob ? 'on file' : '—') %></dd>
+    <dt>Filing status</dt><dd><%= client.filing_status || '—' %></dd>
+    <% if (client.spouse_name || client.spouse_ssn_last4) { %>
+    <dt>Spouse</dt><dd><%= client.spouse_name || '—' %>, SSN <span id="spouse-ssn" class="mono"><%= maskSsn(client.spouse_ssn_last4) %></span> <% if (can.revealSsn(user) && client.spouse_ssn_last4) { %><button class="secondary" data-reveal-ssn="/clients/<%= client.id %>/ssn/reveal" data-which="spouse" data-target="spouse-ssn">Reveal</button><% } %>, DOB <%= sensitive ? (client.spouse_dob || '—') : (client.spouse_dob ? 'on file' : '—') %></dd>
+    <% } %>
+    <dt>Years as client</dt><dd><%= years %> (since <%= client.client_since_year || new Date(client.created_at.replace(' ','T') + 'Z').getFullYear() %>)</dd>
+    <dt>Assigned preparer</dt><dd><%= preparer ? preparer.name : 'Unassigned' %></dd>
+    <dt>Source</dt><dd><%= client.source || '—' %></dd>
+    <dt>Tags</dt><dd><% for (const t of clientTags) { %><span class="tag"><%= t.name %></span><% } %><%= clientTags.length ? '' : '—' %></dd>
+    <dt>Created</dt><dd><%= client.created_at %> UTC via <%= client.created_via %></dd>
+  </dl>
+</div>
+<div class="card">
+  <h3>Contact</h3>
+  <dl>
+    <dt>Phone</dt><dd><%= client.phone || '—' %></dd>
+    <dt>Email</dt><dd><%= client.email || '—' %></dd>
+    <dt>Address</dt><dd><%= [client.address_line1, client.address_line2].filter(Boolean).join(', ') || '—' %><br><%= [client.city, client.state, client.zip].filter(Boolean).join(' ') %></dd>
+  </dl>
+  <% if (sensitive) { %><h3>Internal notes</h3><p style="white-space:pre-wrap"><%= client.notes || '—' %></p><% } %>
+</div>
+</div>
+
+<h2 id="dependents">Dependents</h2>
+<table><thead><tr><th>Name</th><th>Relationship</th><th>Date of birth</th><th>SSN</th><th></th></tr></thead><tbody>
+<% for (const d of dependents) { %>
+<tr>
+  <form method="post" action="/clients/<%= client.id %>/dependents/<%= d.id %>"><input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <td><input type="text" name="name" value="<%= d.name %>" required></td>
+  <td><input type="text" name="relationship" value="<%= d.relationship || '' %>"></td>
+  <td><input type="date" name="dob" value="<%= sensitive ? (d.dob || '') : '' %>" <%= sensitive ? '' : 'placeholder="on file"' %>></td>
+  <td><span id="dep-<%= d.id %>" class="mono"><%= maskSsn(d.ssn_last4) %></span> <% if (can.revealSsn(user) && d.ssn_last4) { %><button type="button" class="secondary" data-reveal-ssn="/clients/<%= client.id %>/ssn/reveal" data-which="dependent" data-dependent="<%= d.id %>" data-target="dep-<%= d.id %>">Reveal</button><% } %><br><input type="text" name="ssn" placeholder="new SSN to replace" autocomplete="off"></td>
+  <td><% if (can.editClientCore(user)) { %><button type="submit">Save</button> <button type="submit" name="_action" value="delete" class="danger" formnovalidate>Remove</button><% } %></td>
+  </form>
+</tr>
+<% } %>
+<% if (can.editClientCore(user)) { %>
+<tr>
+  <form method="post" action="/clients/<%= client.id %>/dependents"><input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <td><input type="text" name="name" placeholder="New dependent name" required></td>
+  <td><input type="text" name="relationship" placeholder="Son, Daughter…"></td>
+  <td><input type="date" name="dob"></td>
+  <td><input type="text" name="ssn" placeholder="###-##-####" autocomplete="off"></td>
+  <td><button type="submit">Add</button></td>
+  </form>
+</tr>
+<% } %>
+</tbody></table>
+
+<% if (sensitive) { %>
+<h2 id="history">Year-by-year history</h2>
+<table><thead><tr><th>Year</th><th>Services performed</th><th>Fee charged</th><th>Notes</th><th></th></tr></thead><tbody>
+<% for (const h of history) { %>
+<tr>
+  <form method="post" action="/clients/<%= client.id %>/history"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="year" value="<%= h.year %>">
+  <td><%= h.year %></td>
+  <td><input type="text" name="services" value="<%= h.services || '' %>"></td>
+  <td><input type="text" name="fee" value="<%= h.fee_cents == null ? '' : (h.fee_cents / 100).toFixed(2) %>" inputmode="decimal"></td>
+  <td><input type="text" name="notes" value="<%= h.notes || '' %>"></td>
+  <td><% if (can.editClientSensitive(user)) { %><button type="submit">Save</button> <button type="submit" name="_action" value="delete" class="danger">Delete</button><% } %></td>
+  </form>
+</tr>
+<% } %>
+<% if (can.editClientSensitive(user)) { %>
+<tr>
+  <form method="post" action="/clients/<%= client.id %>/history"><input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <td><input type="number" name="year" min="1950" max="2100" value="<%= taxYear %>" required></td>
+  <td><input type="text" name="services" placeholder="e.g. 1040 + Schedule C"></td>
+  <td><input type="text" name="fee" placeholder="0.00" inputmode="decimal"></td>
+  <td><input type="text" name="notes"></td>
+  <td><button type="submit">Add year</button></td>
+  </form>
+</tr>
+<% } %>
+</tbody></table>
+<% } %>
+
+<h2 id="vault">Document vault</h2>
+<% if (can.uploadDocuments(user)) { %>
+<form method="post" action="/clients/<%= client.id %>/documents" enctype="multipart/form-data" class="card row">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <div><label>File</label><input type="file" name="file" required></div>
+  <div><label>Tax year</label><input type="number" name="tax_year" value="<%= taxYear %>" min="1990" max="2100" required></div>
+  <div><label>Category</label><select name="category"><% for (const c of constants.DOCUMENT_CATEGORIES) { %><option><%= c %></option><% } %></select></div>
+  <div><label>Title (optional)</label><input type="text" name="title" placeholder="defaults to filename"></div>
+  <div><button type="submit">Upload</button></div>
+</form>
+<% } %>
+<% if (!vault.length) { %><p class="muted">No documents yet.</p><% } %>
+<% for (const y of vault) { %>
+  <h3>Tax year <%= y.year %></h3>
+  <% for (const cat of y.categories) { %>
+    <h4 style="margin:0.3rem 0"><%= cat.category %></h4>
+    <table><thead><tr><th>Document</th><th>Latest file</th><th>Version</th><th>Uploaded by</th><th>Uploaded at</th><th>Status</th><th></th></tr></thead><tbody>
+    <% for (const d of cat.documents) { %>
+      <tr>
+        <td><a href="/documents/<%= d.id %>"><%= d.title %></a></td>
+        <td><%= d.latest.original_filename %> <span class="muted">(<%= (d.latest.size_bytes/1024).toFixed(1) %> KB)</span></td>
+        <td>v<%= d.latest.version_no %><%= d.versions.length > 1 ? ' of ' + d.versions.length : '' %></td>
+        <td><%= d.latest.uploaded_by_label %> <span class="muted">(<%= d.latest.uploaded_by_type %>)</span></td>
+        <td><%= fmtTs(d.latest.uploaded_at) %></td>
+        <td><span class="status <%= d.status %>"><%= d.status %></span><% if (d.status === 'rejected') { %><br><small><%= d.rejection_reason %></small><% } %></td>
+        <td><a href="/documents/<%= d.id %>/download">Download</a></td>
+      </tr>
+    <% } %>
+    </tbody></table>
+  <% } %>
+<% } %>
+
+<% if (can.generateMagicLinks(user)) { %>
+<h2 id="portal">Client portal (magic links)</h2>
+<form method="post" action="/clients/<%= client.id %>/magic-links" class="row card">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <div><label>Tax year for this link</label><input type="number" name="tax_year" value="<%= taxYear %>" min="1990" max="2100" required></div>
+  <div><button type="submit">Generate returning-client link</button></div>
+  <div class="muted">Valid for <%= settings.magic_link_valid_hours %> hours. The client must confirm the last 4 of their SSN and date of birth before seeing anything.</div>
+</form>
+<table><thead><tr><th>Created</th><th>By</th><th>Tax year</th><th>Expires</th><th>State</th><th>Verified</th><th></th></tr></thead><tbody>
+<% for (const l of magicLinks) { %>
+<tr><td><%= l.created_at %></td><td><%= l.creator %></td><td><%= l.tax_year %></td><td><%= l.expires_at.slice(0,16).replace('T',' ') %></td><td><%= linkState(l) %> (<%= l.verify_attempts %> failed attempts)</td><td><%= l.verified_at || '—' %></td>
+<td><% if (linkState(l) === 'valid') { %><form class="inline" method="post" action="/clients/<%= client.id %>/magic-links/<%= l.id %>/revoke"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="danger">Revoke</button></form>
+<% if (client.email) { %><form class="inline" method="post" action="/clients/<%= client.id %>/magic-links/<%= l.id %>/email"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="secondary">Email a fresh link</button></form><% } %><% } %></td></tr>
+<% } %>
+<% if (!magicLinks.length) { %><tr><td colspan="7" class="muted">No links generated yet.</td></tr><% } %>
+</tbody></table>
+<% } %>
+
+<h2 id="activity">Client portal activity</h2>
+<table><thead><tr><th>When</th><th>Action</th><th>Details</th></tr></thead><tbody>
+<% for (const a of activity) { %>
+<tr><td><%= fmtTs(a.ts) %></td><td><%= a.action.replace('portal.','').replace(/_/g,' ') %></td><td class="mono" style="font-size:0.8rem"><%= a.details || '' %></td></tr>
+<% } %>
+<% if (!activity.length) { %><tr><td colspan="3" class="muted">No portal activity yet.</td></tr><% } %>
+</tbody></table>
+
+<h2>Recent changes (staff &amp; system)</h2>
+<table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Details</th></tr></thead><tbody>
+<% for (const a of recentAudit) { %>
+<tr><td><%= fmtTs(a.ts) %></td><td><%= a.actor_label || a.actor_type %></td><td><%= a.action %></td><td class="mono" style="font-size:0.8rem"><%= a.details || '' %></td></tr>
+<% } %>
+</tbody></table>
+<% if (can.deleteClients(user)) { %>
+<form method="post" action="/clients/<%= client.id %>/delete" data-confirm="Permanently delete this client, their documents and history? This cannot be undone."><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="danger">Delete client</button></form>
+<% } %>
+<%- include('../partials/foot') %>

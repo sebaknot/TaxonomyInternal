@@ -1,0 +1,14 @@
+<%- include('../partials/head') %>
+<h1>Set up two-factor authentication</h1>
+<p>Two-factor authentication is required for all accounts. Scan this QR code with an authenticator app (Google Authenticator, Microsoft Authenticator, 1Password, Authy…), then enter the code it shows.</p>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<p><img src="<%= qr %>" alt="QR code for authenticator app" width="220" height="220"></p>
+<p class="muted">Can't scan? Enter this key manually: <span class="mono"><%= secret %></span></p>
+<form method="post" action="/mfa/setup" style="max-width:420px">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <input type="hidden" name="next" value="<%= next %>">
+  <label>6-digit code</label>
+  <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus>
+  <p><button type="submit">Activate</button></p>
+</form>
+<%- include('../partials/foot') %>

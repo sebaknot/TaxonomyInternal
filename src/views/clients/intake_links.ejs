@@ -1,0 +1,19 @@
+<%- include('../partials/head') %>
+<h1>New-client intake links</h1>
+<% if (created) { %>
+<div class="card"><h3>Link created</h3><p>Send this to the prospective client. It is shown once and cannot be displayed again. Expires <%= new Date(created.link.expires_at).toUTCString() %>.</p><p class="link-box mono"><%= created.url %></p></div>
+<% } %>
+<form method="post" action="/clients/intake-links" class="row card">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <div><label>Label (who it's for)</label><input type="text" name="label" placeholder="e.g. Maria G. – referred by J. Lopez"></div>
+  <div><label>Tax year</label><input type="number" name="tax_year" value="<%= taxYear %>" min="1990" max="2100" required></div>
+  <div><button type="submit">Generate intake link</button></div>
+</form>
+<table><thead><tr><th>Created</th><th>By</th><th>Label</th><th>Tax year</th><th>Expires</th><th>State</th><th>Result</th><th></th></tr></thead><tbody>
+<% for (const l of links) { %>
+<tr><td><%= l.created_at %></td><td><%= l.creator %></td><td><%= l.label || '' %></td><td><%= l.tax_year %></td><td><%= l.expires_at.slice(0,16).replace('T',' ') %></td><td><%= linkState(l) %></td>
+<td><% if (l.created_client_id) { %><a href="/clients/<%= l.created_client_id %>"><%= l.created_client_name %></a><% } else if (l.verified_at) { %>identity given, form not submitted<% } %></td>
+<td><% if (linkState(l) === 'valid') { %><form class="inline" method="post" action="/clients/intake-links/<%= l.id %>/revoke"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="danger">Revoke</button></form><% } %></td></tr>
+<% } %>
+</tbody></table>
+<%- include('../partials/foot') %>

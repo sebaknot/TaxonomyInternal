@@ -1,0 +1,12 @@
+<%- include('../partials/head') %>
+<h1>Audit log</h1>
+<p>Filter: <a href="/admin/audit" <%= !filter ? 'style="font-weight:bold"' : '' %>>all</a> <% for (const f of filters) { %><a href="/admin/audit?filter=<%= f %>" <%= filter === f ? 'style="font-weight:bold"' : '' %>><%= f %></a> <% } %> · <%= total %> entries</p>
+<table><thead><tr><th>When (UTC)</th><th>Actor</th><th>Action</th><th>Entity</th><th>Details</th><th>IP</th><th>Browser</th></tr></thead><tbody>
+<% for (const a of rows) { %>
+<tr><td><%= a.ts %></td><td><%= a.actor_label || '' %> <span class="muted">(<%= a.actor_type %>)</span></td><td><%= a.action %></td>
+<td><% if (a.client_id) { %><a href="/clients/<%= a.client_id %>">client</a><% } else { %><%= a.entity_type || '' %><% } %></td>
+<td class="mono" style="font-size:0.8rem"><%= a.details || '' %></td><td><%= a.ip || '' %></td><td class="muted" style="font-size:0.75rem"><%= (a.user_agent || '').slice(0,60) %></td></tr>
+<% } %>
+</tbody></table>
+<p><% if (page > 0) { %><a href="?filter=<%= filter %>&page=<%= page - 1 %>">Newer</a><% } %> <% if ((page + 1) * 100 < total) { %><a href="?filter=<%= filter %>&page=<%= page + 1 %>">Older</a><% } %></p>
+<%- include('../partials/foot') %>

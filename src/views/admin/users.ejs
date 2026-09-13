@@ -1,0 +1,10 @@
+<%- include('../partials/head') %>
+<h1>Staff users</h1>
+<p><a class="btn" href="/admin/users/new">New user</a></p>
+<table><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>MFA</th><th>Status</th><th>Active sessions</th><th>Created</th></tr></thead><tbody>
+<% for (const u of users) { %>
+<tr><td><a href="/admin/users/<%= u.id %>"><%= u.name %></a></td><td><%= u.email %></td><td><%= roleLabels[u.role] %></td><td><%= u.mfa_enabled ? 'enrolled' : 'pending enrollment' %></td>
+<td><%= u.is_active ? 'active' : 'REVOKED ' + (u.revoked_at || '') %><%= u.locked_until && new Date(u.locked_until) > new Date() ? ' (temporarily locked)' : '' %></td><td><%= sessionCounts[u.id] || 0 %></td><td><%= u.created_at %></td></tr>
+<% } %>
+</tbody></table>
+<%- include('../partials/foot') %>

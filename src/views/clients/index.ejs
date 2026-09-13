@@ -1,0 +1,31 @@
+<%- include('../partials/head') %>
+<h1>Clients</h1>
+<p><% if (['admin','manager','intake'].includes(user.role)) { %><a class="btn" href="/clients/new">New client</a><% } %></p>
+<form method="get" action="/clients" class="row card">
+  <div><label>Search</label><input type="text" name="q" value="<%= q %>" placeholder="Name, email, phone"></div>
+  <div><label>Tag</label><select name="tag"><option value="">Any</option><% for (const t of tags) { %><option value="<%= t.name %>" <%= tag === t.name ? 'selected' : '' %>><%= t.name %></option><% } %></select></div>
+  <% if (user.role !== 'preparer') { %><div><label>Preparer</label><select name="preparer"><option value="">Any</option><% for (const p of preparers) { %><option value="<%= p.id %>" <%= preparerId === p.id ? 'selected' : '' %>><%= p.name %></option><% } %></select></div><% } %>
+  <div><label>Source</label><select name="source"><option value="">Any</option><% for (const s of constants.CLIENT_SOURCES) { %><option value="<%= s %>" <%= source === s ? 'selected' : '' %>><%= s %></option><% } %></select></div>
+  <div><button type="submit">Filter</button> <a class="btn secondary" href="/clients">Clear</a></div>
+</form>
+<p class="muted"><%= clients.length %> client(s)<%= clients.length === 500 ? ' (showing first 500 — narrow your search)' : '' %></p>
+<table>
+<thead><tr><th>Legal name</th><th>Preferred</th><th>SSN</th><th>Phone</th><th>Email</th><th>Preparer</th><th>Tags</th><th>Source</th><th>Years</th></tr></thead>
+<tbody>
+<% for (const c of clients) { %>
+<tr>
+  <td><a href="/clients/<%= c.id %>"><%= c.legal_name %></a></td>
+  <td><%= c.preferred_name || '' %></td>
+  <td class="mono"><%= maskSsn(c.ssn_last4) %></td>
+  <td><%= c.phone || '' %></td>
+  <td><%= c.email || '' %></td>
+  <td><%= c.preparer_name || '—' %></td>
+  <td><%= c.tag_names || '' %></td>
+  <td><%= c.source || '' %></td>
+  <td><%= yearsAsClient(c) %></td>
+</tr>
+<% } %>
+<% if (!clients.length) { %><tr><td colspan="9" class="muted">No clients match.</td></tr><% } %>
+</tbody>
+</table>
+<%- include('../partials/foot') %>

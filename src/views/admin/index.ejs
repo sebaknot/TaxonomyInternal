@@ -1,0 +1,11 @@
+<%- include('../partials/head') %>
+<h1>Administration</h1>
+<div class="grid">
+  <div class="card"><h3>Staff users</h3><p>Create accounts, assign roles, revoke access instantly, reset MFA.</p><a class="btn" href="/admin/users">Users</a></div>
+  <div class="card"><h3>Security alerts <% if (openAlerts) { %><span class="tag"><%= openAlerts %> open</span><% } %></h3><p>Logins from new devices or unrecognized locations.</p><a class="btn" href="/admin/alerts">Alerts</a></div>
+  <div class="card"><h3>Audit log</h3><p>Every login, logout, failed attempt, SSN reveal, record edit, upload and portal action.</p><a class="btn" href="/admin/audit">Audit log</a></div>
+  <div class="card"><h3>Settings</h3><p>Session idle timeout, magic link validity, current tax year.</p><a class="btn" href="/admin/settings">Settings</a></div>
+  <div class="card"><h3>Specialization tags</h3><a class="btn secondary" href="/admin/tags">Tags</a></div>
+  <div class="card"><h3>Email outbox</h3><p>Everything the system tried to email (alerts, portal links).</p><a class="btn secondary" href="/admin/outbox">Outbox</a></div>
+</div>
+<%- include('../partials/foot') %>

@@ -1,0 +1,11 @@
+<%- include('../partials/head') %>
+<h1>Security alerts</h1>
+<p class="muted">Raised when a user signs in from a device or IP address not previously seen for their account. Admins are also emailed (see the outbox if SMTP is not configured).</p>
+<table><thead><tr><th>When (UTC)</th><th>Type</th><th>User</th><th>Message</th><th>Details</th><th></th></tr></thead><tbody>
+<% for (const a of alerts) { %>
+<tr style="<%= a.acknowledged_at ? 'opacity:0.6' : '' %>"><td><%= a.ts %></td><td><%= a.type.replace(/_/g,' ') %></td><td><% if (a.user_id) { %><a href="/admin/users/<%= a.user_id %>"><%= a.user_name || a.user_id %></a><% } %></td><td><%= a.message %></td><td class="mono" style="font-size:0.75rem"><%= a.details %></td>
+<td><% if (a.acknowledged_at) { %><span class="muted">ack by <%= a.acknowledged_by %></span><% } else { %><form method="post" action="/admin/alerts/<%= a.id %>/ack"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="secondary">Acknowledge</button></form><% } %></td></tr>
+<% } %>
+<% if (!alerts.length) { %><tr><td colspan="6" class="muted">No alerts.</td></tr><% } %>
+</tbody></table>
+<%- include('../partials/foot') %>

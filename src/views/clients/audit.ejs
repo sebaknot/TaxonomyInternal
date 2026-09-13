@@ -1,0 +1,10 @@
+<%- include('../partials/head') %>
+<h1>Audit trail: <a href="/clients/<%= client.id %>"><%= client.legal_name %></a></h1>
+<p class="muted"><%= total %> entries</p>
+<table><thead><tr><th>When (UTC)</th><th>Actor</th><th>Action</th><th>Entity</th><th>Details</th><th>IP</th></tr></thead><tbody>
+<% for (const a of rows) { %>
+<tr><td><%= a.ts %></td><td><%= a.actor_label || '' %> <span class="muted">(<%= a.actor_type %>)</span></td><td><%= a.action %></td><td><%= a.entity_type || '' %></td><td class="mono" style="font-size:0.8rem"><%= a.details || '' %></td><td><%= a.ip || '' %></td></tr>
+<% } %>
+</tbody></table>
+<p><% if (page > 0) { %><a href="?page=<%= page - 1 %>">Newer</a><% } %> <% if ((page + 1) * 100 < total) { %><a href="?page=<%= page + 1 %>">Older</a><% } %></p>
+<%- include('../partials/foot') %>

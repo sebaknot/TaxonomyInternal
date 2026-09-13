@@ -1,0 +1,12 @@
+<%- include('../partials/head') %>
+<h1>Two-factor verification</h1>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<form method="post" action="/mfa" style="max-width:420px">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <input type="hidden" name="next" value="<%= next %>">
+  <label>Enter the 6-digit code from your authenticator app (or a backup code)</label>
+  <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus>
+  <p><button type="submit">Verify</button></p>
+</form>
+<form method="post" action="/logout"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="secondary">Cancel and sign out</button></form>
+<%- include('../partials/foot') %>

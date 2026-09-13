@@ -1,0 +1,17 @@
+<%- include('../partials/head') %>
+<h1>Import results: <%= record.original_filename %></h1>
+<div class="grid">
+  <div class="card"><h3><%= summary.created %></h3>client record(s) created</div>
+  <div class="card"><h3><%= summary.failed %></h3>row(s) failed</div>
+</div>
+<% if (summary.errors && summary.errors.length) { %>
+<h2>Failed rows</h2>
+<p>Fix these rows in the spreadsheet and import just those rows again. Nothing was silently dropped.</p>
+<table><thead><tr><th>Spreadsheet row</th><th>Name</th><th>Problem</th></tr></thead><tbody>
+<% for (const e of summary.errors) { %><tr><td><%= e.row %></td><td><%= e.name || '' %></td><td><%= e.message %></td></tr><% } %>
+</tbody></table>
+<% } %>
+<h3>Mapping used</h3>
+<ul><% for (const [h, k] of Object.entries(mapping)) { if (k !== 'skip') { %><li><%= h %> → <%= k %></li><% } } %></ul>
+<p><a class="btn" href="/clients">View clients</a> <a class="btn secondary" href="/imports">Another import</a></p>
+<%- include('../partials/foot') %>

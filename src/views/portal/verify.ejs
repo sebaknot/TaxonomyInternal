@@ -1,0 +1,11 @@
+<%- include('../partials/head') %>
+<h1>Verify your identity</h1>
+<p>To protect your information, please confirm two details before we show anything.</p>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<form method="post" action="/portal/verify" style="max-width:420px">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <label>Last 4 digits of your Social Security number</label><input type="text" name="last4" inputmode="numeric" maxlength="4" pattern="[0-9]{4}" required autocomplete="off" autofocus>
+  <label>Date of birth</label><input type="date" name="dob" required>
+  <p><button type="submit">Continue</button></p>
+</form>
+<%- include('../partials/foot') %>

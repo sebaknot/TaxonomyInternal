@@ -1,0 +1,12 @@
+<%- include('../partials/head') %>
+<h1>Settings</h1>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<form method="post" action="/admin/settings" style="max-width:480px">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <label>Firm name</label><input type="text" name="firm_name" value="<%= values.firm_name %>" required>
+  <label>Session idle timeout (minutes) — staff are signed out after this much inactivity</label><input type="number" name="session_idle_minutes" min="1" max="240" value="<%= values.session_idle_minutes %>" required>
+  <label>Magic link validity (hours)</label><input type="number" name="magic_link_valid_hours" min="1" max="720" value="<%= values.magic_link_valid_hours %>" required>
+  <label>Current tax year (default for uploads and links)</label><input type="number" name="current_tax_year" min="2000" max="2100" value="<%= values.current_tax_year %>" required>
+  <p><button type="submit">Save settings</button></p>
+</form>
+<%- include('../partials/foot') %>

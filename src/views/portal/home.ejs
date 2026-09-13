@@ -1,0 +1,53 @@
+<%- include('../partials/head') %>
+<% const fmtTs = (t) => t ? String(t).replace('T',' ').replace(/\.\d+Z$/,' UTC') : ''; %>
+<% if (welcome) { %><div class="flash success">Thank you — your intake has been received. You can upload documents below.</div><% } %>
+<h1>Hello, <%= client.preferred_name || client.legal_name %></h1>
+<p>Tax year <strong><%= link.tax_year %></strong>. Please review each section: mark it "No changes" if it's still correct, or update it.</p>
+
+<% const st = (k) => sectionState[k] ? `<span class="tag">${sectionState[k].action === 'portal.section_confirmed' ? 'confirmed unchanged' : 'updated'} ${fmtTs(sectionState[k].ts)}</span>` : ''; %>
+<div class="card">
+  <h3>Contact information <%- st('contact') %></h3>
+  <dl><dt>Phone</dt><dd><%= client.phone || '—' %></dd><dt>Email</dt><dd><%= client.email || '—' %></dd><dt>Address</dt><dd><%= [client.address_line1, client.address_line2].filter(Boolean).join(', ') || '—' %><br><%= [client.city, client.state, client.zip].filter(Boolean).join(' ') %></dd></dl>
+  <form class="inline" method="post" action="/portal/confirm/contact"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="secondary">No changes</button></form> <a class="btn" href="/portal/update/contact">Update</a>
+</div>
+<div class="card">
+  <h3>Personal information <%- st('personal') %></h3>
+  <dl><dt>Legal name</dt><dd><%= client.legal_name %></dd><dt>Preferred name</dt><dd><%= client.preferred_name || '—' %></dd><dt>Date of birth</dt><dd><%= client.dob || '—' %></dd><dt>SSN</dt><dd class="mono"><%= maskSsn(client.ssn_last4, true) %></dd></dl>
+  <form class="inline" method="post" action="/portal/confirm/personal"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="secondary">No changes</button></form> <a class="btn" href="/portal/update/personal">Update</a>
+</div>
+<div class="card">
+  <h3>Filing status &amp; spouse <%- st('filing') %></h3>
+  <dl><dt>Filing status</dt><dd><%= client.filing_status || '—' %></dd><dt>Spouse</dt><dd><%= client.spouse_name || '—' %><% if (client.spouse_ssn_last4) { %> (SSN <span class="mono"><%= maskSsn(client.spouse_ssn_last4, true) %></span>)<% } %></dd><dt>Spouse DOB</dt><dd><%= client.spouse_dob || '—' %></dd></dl>
+  <form class="inline" method="post" action="/portal/confirm/filing"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="secondary">No changes</button></form> <a class="btn" href="/portal/update/filing">Update</a>
+</div>
+<div class="card" id="dependents">
+  <h3>Dependents <%- st('dependents') %></h3>
+  <table><thead><tr><th>Name</th><th>Relationship</th><th>Date of birth</th><th>SSN</th><th></th></tr></thead><tbody>
+  <% for (const d of dependents) { %>
+  <tr><form method="post" action="/portal/dependents"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="id" value="<%= d.id %>">
+    <td><input type="text" name="name" value="<%= d.name %>" required></td><td><input type="text" name="relationship" value="<%= d.relationship || '' %>"></td><td><input type="date" name="dob" value="<%= d.dob || '' %>"></td>
+    <td><span class="mono"><%= maskSsn(d.ssn_last4, true) %></span><br><input type="text" name="ssn" placeholder="enter to replace" autocomplete="off"></td>
+    <td><button type="submit">Save</button> <button type="submit" name="_action" value="delete" class="danger" formnovalidate>Remove</button></td></form></tr>
+  <% } %>
+  <tr><form method="post" action="/portal/dependents"><input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <td><input type="text" name="name" placeholder="Add a dependent" required></td><td><input type="text" name="relationship"></td><td><input type="date" name="dob"></td><td><input type="text" name="ssn" placeholder="###-##-####" autocomplete="off"></td><td><button type="submit">Add</button></td></form></tr>
+  </tbody></table>
+  <form class="inline" method="post" action="/portal/confirm/dependents"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="secondary">No changes to dependents</button></form>
+</div>
+
+<div class="card" id="documents">
+  <h3>Upload documents for tax year <%= link.tax_year %></h3>
+  <form method="post" action="/portal/documents" enctype="multipart/form-data">
+    <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+    <label>File (PDF, photo, Word, Excel — up to 25 MB)</label><input type="file" name="file" required>
+    <label>What is it?</label><select name="category"><% for (const c of categories) { %><option><%= c %></option><% } %></select>
+    <label>Description (optional)</label><input type="text" name="description" placeholder="e.g. W-2 from Acme Corp">
+    <p><button type="submit">Upload</button></p>
+  </form>
+  <h4>Uploaded so far</h4>
+  <table><thead><tr><th>File</th><th>Category</th><th>Uploaded</th><th>Status</th></tr></thead><tbody>
+  <% for (const d of docs) { %><tr><td><%= d.original_filename %></td><td><%= d.category %></td><td><%= fmtTs(d.uploaded_at) %></td><td><span class="status <%= d.status %>"><%= d.status %></span><% if (d.status === 'rejected') { %> — <%= d.rejection_reason %><% } %></td></tr><% } %>
+  <% if (!docs.length) { %><tr><td colspan="4" class="muted">Nothing uploaded yet.</td></tr><% } %>
+  </tbody></table>
+</div>
+<%- include('../partials/foot') %>

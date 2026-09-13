@@ -1,0 +1,5 @@
+<%- include('../partials/head') %>
+<h1>Specialization tags</h1>
+<ul><% for (const t of tags) { %><li><%= t.name %></li><% } %></ul>
+<form method="post" action="/admin/tags" class="row" style="max-width:480px"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><div><label>New tag</label><input type="text" name="name" required maxlength="60"></div><div><button type="submit">Add</button></div></form>
+<%- include('../partials/foot') %>

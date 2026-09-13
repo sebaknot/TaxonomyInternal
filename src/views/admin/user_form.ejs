@@ -1,0 +1,13 @@
+<%- include('../partials/head') %>
+<h1>New staff user</h1>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<form method="post" action="/admin/users" style="max-width:480px">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <label>Full name</label><input type="text" name="name" required>
+  <label>Email (used to sign in)</label><input type="email" name="email" required>
+  <label>Role</label><select name="role"><% for (const r of constants.ROLES) { %><option value="<%= r %>"><%= roleLabels[r] %></option><% } %></select>
+  <label>Temporary password (12+ characters, letters and numbers)</label><input type="password" name="password" required autocomplete="new-password">
+  <p class="muted">Share the password with the user out of band. They enroll two-factor authentication at their first sign-in.</p>
+  <p><button type="submit">Create user</button></p>
+</form>
+<%- include('../partials/foot') %>

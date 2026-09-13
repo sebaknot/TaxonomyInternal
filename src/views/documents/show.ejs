@@ -1,0 +1,41 @@
+<%- include('../partials/head') %>
+<% const fmtTs = (t) => t ? String(t).replace('T',' ').replace(/\.\d+Z$/,' UTC') : ''; %>
+<h1><%= document.title %></h1>
+<p><a href="/clients/<%= client.id %>#vault">← <%= client.legal_name %></a> · Tax year <%= document.tax_year %> · <%= document.category %> · <span class="status <%= document.status %>"><%= document.status %></span>
+<% if (document.status_set_by) { %><span class="muted">(set by <%= document.status_set_by %> at <%= document.status_set_at %> UTC)</span><% } %></p>
+<% if (document.status === 'rejected') { %><div class="flash error">Rejected: <%= document.rejection_reason %></div><% } %>
+<div class="grid">
+<% if (can.setDocumentStatus(user)) { %>
+<div class="card"><h3>Status</h3>
+<form method="post" action="/documents/<%= document.id %>/status">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <label>Status</label><select name="status"><% for (const s of constants.DOCUMENT_STATUSES) { %><option value="<%= s %>" <%= document.status === s ? 'selected' : '' %>><%= s %></option><% } %></select>
+  <label>Reason (required when rejecting)</label><input type="text" name="reason" value="<%= document.rejection_reason || '' %>">
+  <p><button type="submit">Update status</button></p>
+</form></div>
+<div class="card"><h3>Details</h3>
+<form method="post" action="/documents/<%= document.id %>/meta">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <label>Title</label><input type="text" name="title" value="<%= document.title %>" required>
+  <label>Tax year</label><input type="number" name="tax_year" value="<%= document.tax_year %>" min="1990" max="2100">
+  <label>Category</label><select name="category"><% for (const c of categories) { %><option <%= document.category === c ? 'selected' : '' %>><%= c %></option><% } %></select>
+  <p><button type="submit">Save details</button></p>
+</form></div>
+<% } %>
+<% if (can.uploadDocuments(user)) { %>
+<div class="card"><h3>Upload a new version</h3>
+<p class="muted">The current version is kept; both remain downloadable with their timestamps.</p>
+<form method="post" action="/documents/<%= document.id %>/versions" enctype="multipart/form-data">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <input type="file" name="file" required>
+  <p><button type="submit">Upload version</button></p>
+</form></div>
+<% } %>
+</div>
+<h2>Versions</h2>
+<table><thead><tr><th>Version</th><th>Original filename</th><th>Size</th><th>Uploaded by</th><th>Uploaded at</th><th>SHA-256</th><th></th></tr></thead><tbody>
+<% for (const v of versions) { %>
+<tr><td>v<%= v.version_no %></td><td><%= v.original_filename %></td><td><%= (v.size_bytes/1024).toFixed(1) %> KB</td><td><%= v.uploaded_by_label %> <span class="muted">(<%= v.uploaded_by_type %>)</span></td><td><%= fmtTs(v.uploaded_at) %></td><td class="mono" style="font-size:0.75rem"><%= v.sha256.slice(0,16) %>…</td><td><a href="/documents/<%= document.id %>/versions/<%= v.id %>/download">Download</a></td></tr>
+<% } %>
+</tbody></table>
+<%- include('../partials/foot') %>

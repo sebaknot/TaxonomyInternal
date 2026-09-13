@@ -1,0 +1,19 @@
+<%- include('partials/head') %>
+<h1>Welcome, <%= user.name %></h1>
+<p class="muted">Signed in as <%= roleLabels[user.role] %>. Sessions end automatically after <%= settings.session_idle_minutes %> minutes of inactivity.</p>
+<div class="grid">
+<% if (['admin','manager','preparer','intake'].includes(user.role)) { %>
+  <div class="card"><h3>Clients</h3><p><a class="btn" href="/clients">Open client records</a> <% if (user.role !== 'preparer') { %><a class="btn secondary" href="/clients/new">New client</a><% } %></p></div>
+  <div class="card"><h3>New-client intake links</h3><p>Generate a secure link for a prospective client to fill in their own intake form.</p><p><a class="btn secondary" href="/clients/intake-links">Intake links</a></p></div>
+<% } %>
+<% if (['admin','manager'].includes(user.role)) { %>
+  <div class="card"><h3>Bulk import</h3><p>Import clients from a TaxWise CSV/Excel export.</p><p><a class="btn secondary" href="/imports">Import clients</a></p></div>
+<% } %>
+<% if (user.role === 'admin') { %>
+  <div class="card"><h3>Administration</h3><p>Users, security alerts, audit log, settings.</p><p><a class="btn secondary" href="/admin">Admin</a></p></div>
+<% } %>
+<% if (user.role === 'bookkeeper') { %>
+  <div class="card"><h3>Bookkeeper</h3><p>Payment and expense features arrive in Build 3. There is nothing for this role to do yet.</p></div>
+<% } %>
+</div>
+<%- include('partials/foot') %>

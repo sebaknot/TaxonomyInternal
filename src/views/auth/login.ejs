@@ -1,0 +1,11 @@
+<%- include('../partials/head') %>
+<h1>Sign in</h1>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<form method="post" action="/login" style="max-width:420px">
+  <input type="hidden" name="next" value="<%= next %>">
+  <label>Email</label><input type="email" name="email" required autocomplete="username" autofocus>
+  <label>Password</label><input type="password" name="password" required autocomplete="current-password">
+  <p><button type="submit">Continue</button></p>
+  <p class="muted">Two-factor authentication is required for every account.</p>
+</form>
+<%- include('../partials/foot') %>

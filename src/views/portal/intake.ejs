@@ -1,0 +1,48 @@
+<%- include('../partials/head') %>
+<% const v = (k, d = '') => form[k] == null ? d : form[k]; %>
+<h1>New client intake</h1>
+<p>Thanks, <%= identity.name %>. Please complete the form below. Fields marked * are required.</p>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<form method="post" action="/portal/intake">
+<input type="hidden" name="_csrf" value="<%= csrfToken %>">
+<fieldset><legend>About you</legend>
+  <label>Legal name *</label><input type="text" name="legal_name" required value="<%= v('legal_name', identity.name) %>">
+  <label>Preferred name</label><input type="text" name="preferred_name" value="<%= v('preferred_name') %>">
+  <div class="row">
+    <div><label>Social Security number</label><input type="text" name="ssn" inputmode="numeric" autocomplete="off" placeholder="###-##-####"><small class="help">Encrypted and visible only to your preparer.</small></div>
+    <div><label>Date of birth *</label><input type="date" name="dob" required value="<%= v('dob') %>"></div>
+  </div>
+  <div class="row">
+    <div><label>Email *</label><input type="email" name="email" required value="<%= v('email', identity.email) %>"></div>
+    <div><label>Phone *</label><input type="tel" name="phone" required value="<%= v('phone', identity.phone) %>"></div>
+  </div>
+</fieldset>
+<fieldset><legend>Address</legend>
+  <label>Street address</label><input type="text" name="address_line1" value="<%= v('address_line1') %>">
+  <label>Apt / unit</label><input type="text" name="address_line2" value="<%= v('address_line2') %>">
+  <div class="row">
+    <div><label>City</label><input type="text" name="city" value="<%= v('city') %>"></div>
+    <div><label>State</label><input type="text" name="state" value="<%= v('state') %>"></div>
+    <div><label>ZIP</label><input type="text" name="zip" value="<%= v('zip') %>"></div>
+  </div>
+</fieldset>
+<fieldset><legend>Filing status &amp; spouse</legend>
+  <label>Filing status</label><select name="filing_status"><option value="">—</option><% for (const s of constants.FILING_STATUSES) { %><option <%= v('filing_status') === s ? 'selected' : '' %>><%= s %></option><% } %></select>
+  <div class="row">
+    <div><label>Spouse name</label><input type="text" name="spouse_name" value="<%= v('spouse_name') %>"></div>
+    <div><label>Spouse SSN</label><input type="text" name="spouse_ssn" inputmode="numeric" autocomplete="off"></div>
+    <div><label>Spouse date of birth</label><input type="date" name="spouse_dob" value="<%= v('spouse_dob') %>"></div>
+  </div>
+</fieldset>
+<fieldset><legend>Dependents</legend>
+  <template id="dep-row-template"><div class="row"><div><label>Name</label><input type="text" name="dep_name"></div><div><label>Relationship</label><input type="text" name="dep_relationship"></div><div><label>Date of birth</label><input type="date" name="dep_dob"></div><div><label>SSN</label><input type="text" name="dep_ssn" autocomplete="off"></div></div></template>
+  <% for (const d of dependents) { %><div class="row"><div><label>Name</label><input type="text" name="dep_name" value="<%= d.name %>"></div><div><label>Relationship</label><input type="text" name="dep_relationship" value="<%= d.relationship || '' %>"></div><div><label>Date of birth</label><input type="date" name="dep_dob" value="<%= d.dob || '' %>"></div><div><label>SSN</label><input type="text" name="dep_ssn" autocomplete="off"></div></div><% } %>
+  <div class="row"><div><label>Name</label><input type="text" name="dep_name"></div><div><label>Relationship</label><input type="text" name="dep_relationship"></div><div><label>Date of birth</label><input type="date" name="dep_dob"></div><div><label>SSN</label><input type="text" name="dep_ssn" autocomplete="off"></div></div>
+  <button type="button" class="secondary" data-add-dependent-row>Add another dependent</button>
+</fieldset>
+<fieldset><legend>Anything else?</legend>
+  <label>Message for your preparer</label><textarea name="message"><%= v('message') %></textarea>
+</fieldset>
+<p><button type="submit">Submit intake</button></p>
+</form>
+<%- include('../partials/foot') %>

@@ -1,0 +1,42 @@
+<%- include('../partials/head') %>
+<h1><%= u.name %> <% if (!u.is_active) { %><span class="tag" style="background:#fdecea">REVOKED</span><% } %></h1>
+<div class="grid">
+<div class="card"><h3>Account</h3>
+<form method="post" action="/admin/users/<%= u.id %>">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="_action" value="update">
+  <label>Name</label><input type="text" name="name" value="<%= u.name %>" required>
+  <label>Email</label><input type="email" name="email" value="<%= u.email %>" required>
+  <label>Role</label><select name="role"><% for (const r of constants.ROLES) { %><option value="<%= r %>" <%= u.role === r ? 'selected' : '' %>><%= roleLabels[r] %></option><% } %></select>
+  <p><button type="submit">Save</button></p>
+</form>
+<p class="muted">MFA: <%= u.mfa_enabled ? 'enrolled' : 'not yet enrolled' %>. Failed logins: <%= u.failed_login_count %>.</p>
+</div>
+<div class="card"><h3>Access control</h3>
+<% if (u.is_active) { %>
+<form method="post" action="/admin/users/<%= u.id %>" data-confirm="Revoke <%= u.email %> immediately? All their sessions end now."><input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="_action" value="revoke"><p><button class="danger">Revoke access now</button></p></form>
+<% } else { %>
+<form method="post" action="/admin/users/<%= u.id %>"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="_action" value="reinstate"><p><button>Reinstate access</button></p></form>
+<% } %>
+<form method="post" action="/admin/users/<%= u.id %>"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="_action" value="end_sessions"><p><button class="secondary">End all sessions</button></p></form>
+<form method="post" action="/admin/users/<%= u.id %>" data-confirm="Reset MFA? They must re-enroll at next sign-in."><input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="_action" value="reset_mfa"><p><button class="secondary">Reset two-factor (lost device)</button></p></form>
+<form method="post" action="/admin/users/<%= u.id %>"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><input type="hidden" name="_action" value="reset_password">
+  <label>New temporary password</label><input type="password" name="password" autocomplete="new-password"><p><button class="secondary">Reset password</button></p></form>
+</div>
+</div>
+<h2>Known devices</h2>
+<table><thead><tr><th>Device id</th><th>Browser</th><th>First seen</th><th>Last seen</th></tr></thead><tbody>
+<% for (const d of devices) { %><tr><td class="mono"><%= d.device_id.slice(0,10) %>…</td><td class="muted"><%= d.user_agent %></td><td><%= d.first_seen_at %></td><td><%= d.last_seen_at %></td></tr><% } %>
+</tbody></table>
+<h2>Known locations (IP)</h2>
+<table><thead><tr><th>IP</th><th>First seen</th><th>Last seen</th></tr></thead><tbody>
+<% for (const l of locations) { %><tr><td><%= l.ip %></td><td><%= l.first_seen_at %></td><td><%= l.last_seen_at %></td></tr><% } %>
+</tbody></table>
+<h2>Live sessions</h2>
+<table><thead><tr><th>Started</th><th>Last activity</th><th>IP</th><th>MFA passed</th></tr></thead><tbody>
+<% for (const s of sessions) { %><tr><td><%= s.created_at %></td><td><%= s.last_activity_at %></td><td><%= s.ip %></td><td><%= s.mfa_passed ? 'yes' : 'no' %></td></tr><% } %>
+</tbody></table>
+<h2>Recent activity</h2>
+<table><thead><tr><th>When (UTC)</th><th>Action</th><th>Details</th><th>IP</th></tr></thead><tbody>
+<% for (const a of recent) { %><tr><td><%= a.ts %></td><td><%= a.action %></td><td class="mono" style="font-size:0.8rem"><%= a.details || '' %></td><td><%= a.ip || '' %></td></tr><% } %>
+</tbody></table>
+<%- include('../partials/foot') %>

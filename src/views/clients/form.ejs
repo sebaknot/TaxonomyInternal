@@ -1,0 +1,60 @@
+<%- include('../partials/head') %>
+<% const f = (typeof form !== 'undefined' && form) ? form : (client || {}); const v = (k) => f[k] == null ? '' : f[k]; %>
+<h1><%= title %></h1>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<form method="post" action="<%= client ? '/clients/' + client.id : '/clients' %>">
+<input type="hidden" name="_csrf" value="<%= csrfToken %>">
+<fieldset><legend>Identity</legend>
+  <div class="row">
+    <div><label>Legal name *</label><input type="text" name="legal_name" required value="<%= v('legal_name') %>"></div>
+    <div><label>Preferred name</label><input type="text" name="preferred_name" value="<%= v('preferred_name') %>"></div>
+  </div>
+  <div class="row">
+    <div><label>SSN <% if (client) { %><small class="help">(on file: <%= client.ssn_last4 ? (can.seeSsnLast4(user) ? '***-**-' + client.ssn_last4 : 'yes') : 'none' %> — enter a value only to replace it)</small><% } %></label>
+      <input type="text" name="ssn" inputmode="numeric" autocomplete="off" placeholder="###-##-####" value="">
+      <% if (client && client.ssn_last4 && can.editClientSensitive(user)) { %><label><input type="checkbox" name="clear_ssn" value="1" style="width:auto"> Remove SSN on file</label><% } %></div>
+    <div><label>Date of birth</label><input type="date" name="dob" value="<%= v('dob') %>"></div>
+  </div>
+</fieldset>
+<fieldset><legend>Contact</legend>
+  <div class="row">
+    <div><label>Phone</label><input type="tel" name="phone" value="<%= v('phone') %>"></div>
+    <div><label>Email</label><input type="email" name="email" value="<%= v('email') %>"></div>
+  </div>
+  <label>Address line 1</label><input type="text" name="address_line1" value="<%= v('address_line1') %>">
+  <label>Address line 2</label><input type="text" name="address_line2" value="<%= v('address_line2') %>">
+  <div class="row">
+    <div><label>City</label><input type="text" name="city" value="<%= v('city') %>"></div>
+    <div><label>State</label><input type="text" name="state" value="<%= v('state') %>" maxlength="20"></div>
+    <div><label>ZIP</label><input type="text" name="zip" value="<%= v('zip') %>" maxlength="12"></div>
+  </div>
+</fieldset>
+<fieldset><legend>Filing</legend>
+  <label>Filing status</label>
+  <select name="filing_status"><option value="">—</option><% for (const s of constants.FILING_STATUSES) { %><option value="<%= s %>" <%= v('filing_status') === s ? 'selected' : '' %>><%= s %></option><% } %></select>
+  <div class="row">
+    <div><label>Spouse name</label><input type="text" name="spouse_name" value="<%= v('spouse_name') %>"></div>
+    <div><label>Spouse SSN <% if (client && client.spouse_ssn_last4) { %><small class="help">(on file<%= can.seeSsnLast4(user) ? ': ***-**-' + client.spouse_ssn_last4 : '' %>)</small><% } %></label><input type="text" name="spouse_ssn" inputmode="numeric" autocomplete="off" placeholder="###-##-####" value="">
+      <% if (client && client.spouse_ssn_last4 && can.editClientSensitive(user)) { %><label><input type="checkbox" name="clear_spouse_ssn" value="1" style="width:auto"> Remove spouse SSN</label><% } %></div>
+    <div><label>Spouse date of birth</label><input type="date" name="spouse_dob" value="<%= v('spouse_dob') %>"></div>
+  </div>
+  <p class="muted">Dependents are managed from the client record after saving.</p>
+</fieldset>
+<fieldset><legend>Practice</legend>
+  <% if (can.assignPreparer(user)) { %>
+  <label>Assigned preparer</label>
+  <select name="assigned_preparer_id"><option value="">Unassigned</option><% for (const p of preparers) { %><option value="<%= p.id %>" <%= v('assigned_preparer_id') === p.id ? 'selected' : '' %>><%= p.name %> (<%= roleLabels[p.role] %>)</option><% } %></select>
+  <% } %>
+  <label>Source</label>
+  <select name="source"><option value="">—</option><% for (const s of constants.CLIENT_SOURCES) { %><option value="<%= s %>" <%= v('source') === s ? 'selected' : '' %>><%= s %></option><% } %></select>
+  <label>Specialization tags</label>
+  <% const selectedTags = (typeof form !== 'undefined' && form) ? [].concat(form.tags || []) : clientTags; %>
+  <div><% for (const t of tags) { %><label style="display:inline-block;margin-right:1rem"><input type="checkbox" name="tags" value="<%= t.name %>" style="width:auto" <%= selectedTags.includes(t.name) ? 'checked' : '' %>> <%= t.name %></label><% } %></div>
+  <% if (can.seeSensitiveFields(user)) { %>
+  <label>Client since (year) <small class="help">— auto-lowered to the earliest year in history</small></label><input type="number" name="client_since_year" min="1950" max="2100" value="<%= v('client_since_year') %>">
+  <label>Internal notes</label><textarea name="notes"><%= v('notes') %></textarea>
+  <% } %>
+</fieldset>
+<p><button type="submit">Save</button> <a class="btn secondary" href="<%= client ? '/clients/' + client.id : '/clients' %>">Cancel</a></p>
+</form>
+<%- include('../partials/foot') %>

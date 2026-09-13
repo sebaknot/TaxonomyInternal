@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="csrf" content="<%= csrfToken %>">
+<title><%= title %> · <%= firmName %></title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body class="<%= typeof portal !== 'undefined' && portal ? 'portal' : '' %>">
+<header class="top">
+<% if (typeof portal !== 'undefined' && portal) { %>
+  <strong><%= firmName %> client portal</strong>
+  <span class="spacer"></span>
+  <% if (typeof client !== 'undefined' && client) { %><span class="muted" style="color:#ccc"><%= client.preferred_name || client.legal_name %></span>
+  <form method="post" action="/portal/logout"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button>Sign out</button></form><% } %>
+<% } else { %>
+  <a href="/"><strong><%= firmName %></strong> internal</a>
+  <% if (user) { %>
+    <% if (['admin','manager','preparer','intake'].includes(user.role)) { %><a href="/clients">Clients</a><% } %>
+    <% if (['admin','manager','preparer','intake'].includes(user.role)) { %><a href="/clients/intake-links">Intake links</a><% } %>
+    <% if (['admin','manager'].includes(user.role)) { %><a href="/imports">Import</a><% } %>
+    <% if (user.role === 'admin') { %><a href="/admin">Admin</a><% } %>
+    <span class="spacer"></span>
+    <a href="/account"><%= user.name %> (<%= roleLabels[user.role] %>)</a>
+    <form method="post" action="/logout"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button>Sign out</button></form>
+  <% } %>
+<% } %>
+</header>
+<main>
+<% for (const f of flashes) { %><div class="flash <%= f.type %>"><%= f.message %></div><% } %>

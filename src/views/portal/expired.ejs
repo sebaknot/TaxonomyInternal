@@ -1,0 +1,13 @@
+<%- include('../partials/head') %>
+<% const msgs = {
+  none: 'Please open the secure link you received from us to continue.',
+  invalid: 'This link is not valid.',
+  expired: 'This link has expired. Please contact us and we will send you a new one.',
+  revoked: 'This link is no longer active. Please contact us for a new one.',
+  locked: 'Too many unsuccessful verification attempts. For your security this link has been disabled — please contact us for a new one.',
+  completed: 'This intake form has already been submitted. Thank you!',
+  logout: 'You have been signed out. You can close this window.',
+}; %>
+<h1><%= title %></h1>
+<p><%= msgs[reason] || msgs.invalid %></p>
+<%- include('../partials/foot') %>

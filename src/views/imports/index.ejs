@@ -1,0 +1,15 @@
+<%- include('../partials/head') %>
+<h1>Bulk client import</h1>
+<p>Upload a CSV or Excel (.xlsx) export — for example from TaxWise. The first row must contain column headers. On the next screen you map each column to a client field; rows that fail are reported so you can fix and re-import them.</p>
+<form method="post" action="/imports" enctype="multipart/form-data" class="card row">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <div><label>Spreadsheet</label><input type="file" name="file" accept=".csv,.xlsx,.tsv,.txt" required></div>
+  <div><button type="submit">Upload and map columns</button></div>
+</form>
+<h2>Previous imports</h2>
+<table><thead><tr><th>Date</th><th>File</th><th>By</th><th>Rows</th><th>Status</th><th>Result</th></tr></thead><tbody>
+<% for (const i of imports) { const s = i.summary ? JSON.parse(i.summary) : null; %>
+<tr><td><%= i.created_at %></td><td><a href="/imports/<%= i.id %>"><%= i.original_filename %></a></td><td><%= i.creator %></td><td><%= i.row_count %></td><td><%= i.status %></td><td><%= s ? s.created + ' created, ' + s.failed + ' failed' : '' %></td></tr>
+<% } %>
+</tbody></table>
+<%- include('../partials/foot') %>

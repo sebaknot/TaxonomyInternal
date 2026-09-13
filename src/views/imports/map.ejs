@@ -1,0 +1,16 @@
+<%- include('../partials/head') %>
+<h1>Map columns: <%= record.original_filename %></h1>
+<p><%= record.row_count %> data row(s) found. Choose which client field each spreadsheet column fills. Suggested matches are pre-selected; anything you leave as "Ignore" is skipped. At minimum map <strong>Legal name</strong> (or First + Last name).</p>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<form method="post" action="/imports/<%= record.id %>/run">
+<input type="hidden" name="_csrf" value="<%= csrfToken %>">
+<table><thead><tr><th>Spreadsheet column</th><th>Sample values</th><th>Client field</th></tr></thead><tbody>
+<% for (const h of headers) { %>
+<tr><td><strong><%= h %></strong></td>
+<td class="muted"><%= preview.map(r => r[h]).filter(Boolean).slice(0,3).join(' · ') %></td>
+<td><select name="map[<%= h %>]"><% for (const f of fields) { %><option value="<%= f.key %>" <%= (suggested[h] || 'skip') === f.key ? 'selected' : '' %>><%= f.label %></option><% } %></select></td></tr>
+<% } %>
+</tbody></table>
+<p><button type="submit">Import <%= record.row_count %> row(s)</button> <a class="btn secondary" href="/imports">Cancel</a></p>
+</form>
+<%- include('../partials/foot') %>
