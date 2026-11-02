@@ -1,5 +1,4 @@
 import type { Request, Response, NextFunction, RequestHandler } from 'express';
-import fs from 'node:fs';
 import type { AppContext } from '../context.js';
 import { checkSession, type SessionRow, type UserRow, toSessionUser } from '../services/auth.js';
 import { checkPortalSession, type PortalSessionRow, type MagicLinkRow } from '../services/magic.js';
@@ -28,10 +27,20 @@ declare global {
 }
 
 export class HttpError extends Error {
-  constructor(public status: number, message: string) {
+  constructor(
+    public status: number,
+    message: string,
+  ) {
     super(message);
   }
 }
+
+/** Wraps an async handler so rejections reach the error handler (Express 5 does this too; explicit for clarity/typing). */
+export const wrap =
+  (fn: (req: Request, res: Response, next: NextFunction) => Promise<unknown>): RequestHandler =>
+  (req, res, next) => {
+    fn(req, res, next).catch(next);
+  };
 
 function parseCookies(header: string | undefined): Record<string, string> {
   const out: Record<string, string> = {};
@@ -58,14 +67,14 @@ export function cookieOptions(ctx: AppContext, maxAgeMs?: number) {
 
 /**
  * Attaches ctx, request metadata (ip, UA, signed device id), a cookie-backed flash, and loads
- * whichever session cookie is present. Does not enforce anything.
+ * whichever session cookie is present from the database. Holds no in-memory state, so it is
+ * safe across serverless invocations.
  */
 export function baseMiddleware(ctx: AppContext): RequestHandler {
-  return (req, res, next) => {
+  return wrap(async (req, res, next) => {
     req.ctx = ctx;
     const cookies = parseCookies(req.headers.cookie);
 
-    // Signed device identifier (random id + HMAC), used for "new device" login alerts.
     let deviceId = '';
     const raw = cookies[DEVICE_COOKIE];
     if (raw) {
@@ -78,7 +87,6 @@ export function baseMiddleware(ctx: AppContext): RequestHandler {
     }
     req.meta = { ip: req.ip || req.socket.remoteAddress || '', userAgent: String(req.headers['user-agent'] || ''), deviceId };
 
-    // Flash messages: one-shot cookie.
     const flashes: { type: string; message: string }[] = [];
     if (cookies.tx_flash) {
       try {
@@ -92,8 +100,7 @@ export function baseMiddleware(ctx: AppContext): RequestHandler {
       res.cookie('tx_flash', JSON.stringify(pending), { ...cookieOptions(ctx), maxAge: 60_000 });
     };
 
-    // Staff session
-    const check = checkSession(ctx, cookies[STAFF_COOKIE]);
+    const check = await checkSession(ctx, cookies[STAFF_COOKIE]);
     if (check.status === 'ok') {
       req.staffSession = check.session;
       req.staffUser = check.user;
@@ -104,14 +111,13 @@ export function baseMiddleware(ctx: AppContext): RequestHandler {
       else if (check.status === 'revoked') flashes.push({ type: 'error', message: 'Your access has been revoked. Contact an administrator.' });
       else flashes.push({ type: 'info', message: 'Your session expired. Please sign in again.' });
     }
-    // Portal session
-    const pcheck = checkPortalSession(ctx, cookies[PORTAL_COOKIE]);
+    const pcheck = await checkPortalSession(ctx, cookies[PORTAL_COOKIE]);
     if (pcheck.status === 'ok') {
       req.portalSession = pcheck.session;
       req.portalLink = pcheck.link;
     } else if (pcheck.status !== 'none') res.clearCookie(PORTAL_COOKIE, { path: '/' });
 
-    const settings = allSettings(ctx);
+    const settings = await allSettings(ctx);
     res.locals.user = req.user ?? null;
     res.locals.flashes = flashes;
     res.locals.roleLabels = ROLE_LABELS;
@@ -120,13 +126,14 @@ export function baseMiddleware(ctx: AppContext): RequestHandler {
     res.locals.csrfToken = req.staffSession?.csrf_token ?? req.portalSession?.csrf_token ?? '';
     res.locals.currentPath = req.path;
     next();
-  };
+  });
 }
 
 /** Requires a fully authenticated staff user (password + MFA). */
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
   if (req.user) return next();
   if (req.staffSession && !req.staffSession.mfa_passed) return res.redirect('/mfa');
+  if (req.accepts(['html', 'json']) === 'json') return res.status(401).json({ error: 'Sign in required' });
   const nextUrl = req.method === 'GET' ? `?next=${encodeURIComponent(req.originalUrl)}` : '';
   return res.redirect('/login' + nextUrl);
 }
@@ -139,7 +146,6 @@ export function requireRole(pred: (u: SessionUser) => boolean): RequestHandler {
   };
 }
 
-/** Double-check: every state-changing request must carry the session's CSRF token (form field or header). */
 export function csrfValid(req: Request): boolean {
   const expected = req.staffSession?.csrf_token ?? req.portalSession?.csrf_token;
   if (!expected) return true; // unauthenticated POSTs (login) are rate limited and have no session to ride
@@ -153,25 +159,17 @@ export function csrfProtection(req: Request, _res: Response, next: NextFunction)
   if (!csrfValid(req)) return next(new HttpError(403, 'Invalid or missing CSRF token. Please reload the page and try again.'));
   next();
 }
-/** For multer routes: verify the token that arrived inside the multipart body, discarding the upload on failure. */
+/** For multer routes: verify the token that arrived inside the multipart body. */
 export function csrfAfterUpload(req: Request, _res: Response, next: NextFunction) {
   if (csrfValid(req)) return next();
-  const f = (req as any).file as { path?: string } | undefined;
-  if (f?.path) {
-    fs.rmSync(f.path, { force: true });
-  }
   next(new HttpError(403, 'Invalid or missing CSRF token. Please reload the page and try again.'));
-}
-
-export function requirePortal(req: Request, res: Response, next: NextFunction) {
-  if (!req.portalSession || !req.portalLink) return res.status(401).render('portal/expired', { title: 'Link required', reason: 'none' });
-  next();
 }
 
 export function errorHandler(err: unknown, req: Request, res: Response, _next: NextFunction) {
   const status = err instanceof HttpError ? err.status : (err as any)?.status || 500;
   const message = err instanceof HttpError ? err.message : status === 500 ? 'Something went wrong.' : (err as Error).message;
   if (status >= 500) console.error(err);
+  if (res.headersSent) return;
   if (req.accepts(['html', 'json']) === 'json') return res.status(status).json({ error: message });
   res.status(status).render('error', { title: `Error ${status}`, status, message });
 }

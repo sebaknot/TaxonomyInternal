@@ -108,15 +108,13 @@ const clean = (v: unknown): string | null => {
   return s === '' ? null : s;
 };
 
-export function getClient(ctx: AppContext, id: string): ClientRow | undefined {
-  return ctx.db.prepare('SELECT * FROM clients WHERE id = ?').get(id) as ClientRow | undefined;
+export function getClient(ctx: AppContext, id: string) {
+  return ctx.db.one<ClientRow>('SELECT * FROM clients WHERE id = ?', id);
 }
 
-export function listClients(
-  ctx: AppContext,
-  user: SessionUser,
-  opts: { q?: string; tag?: string; preparerId?: string; source?: string } = {},
-): (ClientRow & { preparer_name: string | null; tag_names: string | null })[] {
+export type ClientListRow = ClientRow & { preparer_name: string | null; tag_names: string | null };
+
+export async function listClients(ctx: AppContext, user: SessionUser, opts: { q?: string; tag?: string; preparerId?: string; source?: string } = {}): Promise<ClientListRow[]> {
   const where: string[] = [];
   const params: unknown[] = [];
   if (!can.viewAllClients(user)) {
@@ -124,7 +122,7 @@ export function listClients(
     params.push(user.id);
   }
   if (opts.q) {
-    where.push('(c.legal_name LIKE ? OR c.preferred_name LIKE ? OR c.email LIKE ? OR c.phone LIKE ?)');
+    where.push('(c.legal_name ILIKE ? OR c.preferred_name ILIKE ? OR c.email ILIKE ? OR c.phone ILIKE ?)');
     const like = `%${opts.q}%`;
     params.push(like, like, like, like);
   }
@@ -141,30 +139,29 @@ export function listClients(
     params.push(opts.tag);
   }
   const w = where.length ? 'WHERE ' + where.join(' AND ') : '';
-  return ctx.db
-    .prepare(
-      `SELECT c.*, u.name AS preparer_name,
-         (SELECT group_concat(t.name, ', ') FROM client_tags ct JOIN tags t ON t.id = ct.tag_id WHERE ct.client_id = c.id) AS tag_names
-       FROM clients c LEFT JOIN users u ON u.id = c.assigned_preparer_id ${w}
-       ORDER BY c.legal_name LIMIT 500`,
-    )
-    .all(...params) as any;
+  return ctx.db.all<ClientListRow>(
+    `SELECT c.*, u.name AS preparer_name,
+       (SELECT string_agg(t.name, ', ' ORDER BY t.name) FROM client_tags ct JOIN tags t ON t.id = ct.tag_id WHERE ct.client_id = c.id) AS tag_names
+     FROM clients c LEFT JOIN users u ON u.id = c.assigned_preparer_id ${w}
+     ORDER BY c.legal_name LIMIT 500`,
+    ...params,
+  );
 }
 
 export function yearsAsClient(c: { client_since_year: number | null; created_at: string }): number {
-  const start = c.client_since_year ?? new Date(c.created_at.replace(' ', 'T') + 'Z').getFullYear();
+  const start = c.client_since_year ?? new Date(c.created_at).getFullYear();
   return Math.max(0, new Date().getFullYear() - start);
 }
 
 /** Recompute client_since_year from the earliest year in history (or keep the manually set one if earlier). */
-export function recomputeClientSince(ctx: AppContext, clientId: string) {
-  const c = getClient(ctx, clientId);
+export async function recomputeClientSince(ctx: AppContext, clientId: string) {
+  const c = await getClient(ctx, clientId);
   if (!c) return;
-  const row = ctx.db.prepare('SELECT MIN(year) y FROM client_year_history WHERE client_id = ?').get(clientId) as { y: number | null };
-  const createdYear = new Date(c.created_at.replace(' ', 'T') + 'Z').getFullYear();
-  const candidates = [c.client_since_year, row.y, createdYear].filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
+  const minYear = await ctx.db.scalar<number | null>('SELECT MIN(year) FROM client_year_history WHERE client_id = ?', clientId);
+  const createdYear = new Date(c.created_at).getFullYear();
+  const candidates = [c.client_since_year, minYear, createdYear].filter((x): x is number => typeof x === 'number' && Number.isFinite(x));
   const min = Math.min(...candidates);
-  if (min !== c.client_since_year) ctx.db.prepare('UPDATE clients SET client_since_year = ? WHERE id = ?').run(min, clientId);
+  if (min !== c.client_since_year) await ctx.db.run('UPDATE clients SET client_since_year = ? WHERE id = ?', min, clientId);
 }
 
 export interface Actor {
@@ -175,49 +172,49 @@ export interface Actor {
   userAgent?: string;
 }
 
-export function createClient(ctx: AppContext, input: ClientInput, actor: Actor, createdVia: 'staff' | 'import' | 'portal_intake' = 'staff'): ClientRow {
+export async function createClient(ctx: AppContext, input: ClientInput, actor: Actor, createdVia: 'staff' | 'import' | 'portal_intake' = 'staff'): Promise<ClientRow> {
   const legal = clean(input.legal_name);
   if (!legal) throw new Error('Legal name is required');
   const id = newId();
   const ssn = normalizeSsn(input.ssn);
   const spouseSsn = normalizeSsn(input.spouse_ssn);
-  ctx.db.transaction(() => {
-    ctx.db
-      .prepare(
-        `INSERT INTO clients (id, legal_name, preferred_name, ssn_enc, ssn_last4, dob, phone, email, address_line1, address_line2, city, state, zip,
-          filing_status, spouse_name, spouse_ssn_enc, spouse_ssn_last4, spouse_dob, assigned_preparer_id, source, notes, client_since_year, created_by, created_via)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      )
-      .run(
-        id,
-        legal,
-        clean(input.preferred_name),
-        ssn ? ctx.cipher.encrypt(ssn, `client_ssn:${id}`) : null,
-        ssn ? ssn.slice(-4) : null,
-        normalizeDate(input.dob),
-        clean(input.phone),
-        clean(input.email),
-        clean(input.address_line1),
-        clean(input.address_line2),
-        clean(input.city),
-        clean(input.state),
-        clean(input.zip),
-        clean(input.filing_status),
-        clean(input.spouse_name),
-        spouseSsn ? ctx.cipher.encrypt(spouseSsn, `spouse_ssn:${id}`) : null,
-        spouseSsn ? spouseSsn.slice(-4) : null,
-        normalizeDate(input.spouse_dob),
-        clean(input.assigned_preparer_id),
-        clean(input.source),
-        clean(input.notes),
-        input.client_since_year ?? null,
-        actor.type === 'user' ? actor.id ?? null : null,
-        createdVia,
-      );
-    if (input.tags) setClientTags(ctx, id, input.tags);
-    recomputeClientSince(ctx, id);
-  })();
-  audit(ctx, {
+  const dob = normalizeDate(input.dob);
+  const spouseDob = normalizeDate(input.spouse_dob);
+  await ctx.db.tx(async (t) => {
+    const tctx = { ...ctx, db: t };
+    await t.run(
+      `INSERT INTO clients (id, legal_name, preferred_name, ssn_enc, ssn_last4, dob, phone, email, address_line1, address_line2, city, state, zip,
+        filing_status, spouse_name, spouse_ssn_enc, spouse_ssn_last4, spouse_dob, assigned_preparer_id, source, notes, client_since_year, created_by, created_via)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id,
+      legal,
+      clean(input.preferred_name),
+      ssn ? ctx.cipher.encrypt(ssn, `client_ssn:${id}`) : null,
+      ssn ? ssn.slice(-4) : null,
+      dob,
+      clean(input.phone),
+      clean(input.email),
+      clean(input.address_line1),
+      clean(input.address_line2),
+      clean(input.city),
+      clean(input.state),
+      clean(input.zip),
+      clean(input.filing_status),
+      clean(input.spouse_name),
+      spouseSsn ? ctx.cipher.encrypt(spouseSsn, `spouse_ssn:${id}`) : null,
+      spouseSsn ? spouseSsn.slice(-4) : null,
+      spouseDob,
+      clean(input.assigned_preparer_id),
+      clean(input.source),
+      clean(input.notes),
+      input.client_since_year ?? null,
+      actor.type === 'user' ? actor.id ?? null : null,
+      createdVia,
+    );
+    if (input.tags) await setClientTags(tctx, id, input.tags);
+    await recomputeClientSince(tctx, id);
+  });
+  await audit(ctx, {
     actorType: actor.type,
     actorId: actor.id,
     actorLabel: actor.label,
@@ -229,12 +226,12 @@ export function createClient(ctx: AppContext, input: ClientInput, actor: Actor, 
     ip: actor.ip,
     userAgent: actor.userAgent,
   });
-  return getClient(ctx, id)!;
+  return (await getClient(ctx, id))!;
 }
 
 /** Updates the given fields; records which fields changed (never the SSN value itself) in the audit log. */
-export function updateClient(ctx: AppContext, id: string, input: Partial<ClientInput>, actor: Actor): ClientRow {
-  const before = getClient(ctx, id);
+export async function updateClient(ctx: AppContext, id: string, input: Partial<ClientInput>, actor: Actor): Promise<ClientRow> {
+  const before = await getClient(ctx, id);
   if (!before) throw new Error('Client not found');
   const sets: string[] = [];
   const params: unknown[] = [];
@@ -277,23 +274,24 @@ export function updateClient(ctx: AppContext, id: string, input: Partial<ClientI
       changed.spouse_ssn = { from: before.spouse_ssn_last4 ? `***-**-${before.spouse_ssn_last4}` : null, to: last4 ? `***-**-${last4}` : null };
     }
   }
-  ctx.db.transaction(() => {
+  await ctx.db.tx(async (t) => {
+    const tctx = { ...ctx, db: t };
     if (sets.length) {
-      sets.push("updated_at = datetime('now')");
-      ctx.db.prepare(`UPDATE clients SET ${sets.join(', ')} WHERE id = ?`).run(...params, id);
+      sets.push('updated_at = now()');
+      await t.run(`UPDATE clients SET ${sets.join(', ')} WHERE id = ?`, ...params, id);
     }
     if (input.tags) {
-      const beforeTags = getClientTags(ctx, id).map((t) => t.name).sort();
+      const beforeTags = (await getClientTags(tctx, id)).map((t) => t.name).sort();
       const afterTags = [...new Set(input.tags.map((t) => t.trim()).filter(Boolean))].sort();
       if (JSON.stringify(beforeTags) !== JSON.stringify(afterTags)) {
-        setClientTags(ctx, id, afterTags);
+        await setClientTags(tctx, id, afterTags);
         changed.tags = { from: beforeTags, to: afterTags };
       }
     }
-    recomputeClientSince(ctx, id);
-  })();
+    await recomputeClientSince(tctx, id);
+  });
   if (Object.keys(changed).length) {
-    audit(ctx, {
+    await audit(ctx, {
       actorType: actor.type,
       actorId: actor.id,
       actorLabel: actor.label,
@@ -306,20 +304,26 @@ export function updateClient(ctx: AppContext, id: string, input: Partial<ClientI
       userAgent: actor.userAgent,
     });
   }
-  return getClient(ctx, id)!;
+  return (await getClient(ctx, id))!;
 }
 
-export function deleteClient(ctx: AppContext, id: string, actor: Actor) {
-  const c = getClient(ctx, id);
+export async function deleteClient(ctx: AppContext, id: string, actor: Actor) {
+  const c = await getClient(ctx, id);
   if (!c) return;
-  ctx.db.prepare('DELETE FROM clients WHERE id = ?').run(id);
-  audit(ctx, { actorType: actor.type, actorId: actor.id, actorLabel: actor.label, action: 'client.delete', entityType: 'client', entityId: id, clientId: id, details: { legal_name: c.legal_name }, ip: actor.ip });
+  const paths = (await ctx.db.all<{ storage_path: string }>('SELECT storage_path FROM document_versions WHERE client_id = ?', id)).map((r) => r.storage_path);
+  await ctx.db.run('DELETE FROM clients WHERE id = ?', id);
+  try {
+    await ctx.storage.remove(paths);
+  } catch (err) {
+    console.error('storage cleanup failed', err);
+  }
+  await audit(ctx, { actorType: actor.type, actorId: actor.id, actorLabel: actor.label, action: 'client.delete', entityType: 'client', entityId: id, clientId: id, details: { legal_name: c.legal_name, objects_removed: paths.length }, ip: actor.ip });
 }
 
 /** Decrypts the full SSN. Always audited — this is the one place full SSNs leave the database. */
-export function revealSsn(ctx: AppContext, client: ClientRow, actor: Actor, which: 'client' | 'spouse' = 'client'): string | null {
+export async function revealSsn(ctx: AppContext, client: ClientRow, actor: Actor, which: 'client' | 'spouse' = 'client'): Promise<string | null> {
   const enc = which === 'spouse' ? client.spouse_ssn_enc : client.ssn_enc;
-  audit(ctx, {
+  await audit(ctx, {
     actorType: actor.type,
     actorId: actor.id,
     actorLabel: actor.label,
@@ -336,84 +340,96 @@ export function revealSsn(ctx: AppContext, client: ClientRow, actor: Actor, whic
 }
 
 // ---------- Tags ----------
-export function ensureDefaultTags(ctx: AppContext) {
-  const ins = ctx.db.prepare('INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)');
-  for (const t of DEFAULT_TAGS) ins.run(newId(), t);
+export async function ensureDefaultTags(ctx: AppContext) {
+  for (const t of DEFAULT_TAGS) await ctx.db.run('INSERT INTO tags (id, name) VALUES (?, ?) ON CONFLICT DO NOTHING', newId(), t);
 }
-export function listTags(ctx: AppContext): { id: string; name: string }[] {
-  return ctx.db.prepare('SELECT * FROM tags ORDER BY name').all() as any;
+export function listTags(ctx: AppContext) {
+  return ctx.db.all<{ id: string; name: string }>('SELECT * FROM tags ORDER BY name');
 }
-export function getClientTags(ctx: AppContext, clientId: string): { id: string; name: string }[] {
-  return ctx.db.prepare('SELECT t.* FROM tags t JOIN client_tags ct ON ct.tag_id = t.id WHERE ct.client_id = ? ORDER BY t.name').all(clientId) as any;
+export function getClientTags(ctx: AppContext, clientId: string) {
+  return ctx.db.all<{ id: string; name: string }>('SELECT t.* FROM tags t JOIN client_tags ct ON ct.tag_id = t.id WHERE ct.client_id = ? ORDER BY t.name', clientId);
 }
-export function setClientTags(ctx: AppContext, clientId: string, names: string[]) {
-  ctx.db.prepare('DELETE FROM client_tags WHERE client_id = ?').run(clientId);
+export async function setClientTags(ctx: AppContext, clientId: string, names: string[]) {
+  await ctx.db.run('DELETE FROM client_tags WHERE client_id = ?', clientId);
   for (const raw of names) {
     const name = raw.trim();
     if (!name) continue;
-    let tag = ctx.db.prepare('SELECT id FROM tags WHERE name = ?').get(name) as { id: string } | undefined;
+    let tag = await ctx.db.one<{ id: string }>('SELECT id FROM tags WHERE lower(name) = lower(?)', name);
     if (!tag) {
       tag = { id: newId() };
-      ctx.db.prepare('INSERT INTO tags (id, name) VALUES (?, ?)').run(tag.id, name);
+      await ctx.db.run('INSERT INTO tags (id, name) VALUES (?, ?)', tag.id, name);
     }
-    ctx.db.prepare('INSERT OR IGNORE INTO client_tags (client_id, tag_id) VALUES (?, ?)').run(clientId, tag.id);
+    await ctx.db.run('INSERT INTO client_tags (client_id, tag_id) VALUES (?, ?) ON CONFLICT DO NOTHING', clientId, tag.id);
   }
 }
-export function createTag(ctx: AppContext, name: string) {
-  ctx.db.prepare('INSERT OR IGNORE INTO tags (id, name) VALUES (?, ?)').run(newId(), name.trim());
+export async function createTag(ctx: AppContext, name: string) {
+  await ctx.db.run('INSERT INTO tags (id, name) VALUES (?, ?) ON CONFLICT DO NOTHING', newId(), name.trim());
 }
 
 // ---------- Dependents ----------
-export function listDependents(ctx: AppContext, clientId: string): DependentRow[] {
-  return ctx.db.prepare('SELECT * FROM dependents WHERE client_id = ? ORDER BY created_at').all(clientId) as DependentRow[];
+export function listDependents(ctx: AppContext, clientId: string) {
+  return ctx.db.all<DependentRow>('SELECT * FROM dependents WHERE client_id = ? ORDER BY created_at', clientId);
 }
-export function addDependent(ctx: AppContext, clientId: string, d: { name: string; relationship?: string | null; dob?: string | null; ssn?: string | null }, actor: Actor): DependentRow {
+export function getDependent(ctx: AppContext, id: string, clientId: string) {
+  return ctx.db.one<DependentRow>('SELECT * FROM dependents WHERE id = ? AND client_id = ?', id, clientId);
+}
+export async function addDependent(ctx: AppContext, clientId: string, d: { name: string; relationship?: string | null; dob?: string | null; ssn?: string | null }, actor: Actor): Promise<DependentRow> {
   const name = clean(d.name);
   if (!name) throw new Error('Dependent name is required');
   const id = newId();
   const ssn = normalizeSsn(d.ssn);
-  ctx.db
-    .prepare('INSERT INTO dependents (id, client_id, name, relationship, dob, ssn_enc, ssn_last4) VALUES (?, ?, ?, ?, ?, ?, ?)')
-    .run(id, clientId, name, clean(d.relationship), normalizeDate(d.dob), ssn ? ctx.cipher.encrypt(ssn, `dependent_ssn:${id}`) : null, ssn ? ssn.slice(-4) : null);
-  audit(ctx, { actorType: actor.type, actorId: actor.id, actorLabel: actor.label, action: 'client.dependent_add', entityType: 'dependent', entityId: id, clientId, details: { name, relationship: d.relationship }, ip: actor.ip });
-  return ctx.db.prepare('SELECT * FROM dependents WHERE id = ?').get(id) as DependentRow;
+  await ctx.db.run(
+    'INSERT INTO dependents (id, client_id, name, relationship, dob, ssn_enc, ssn_last4) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    id,
+    clientId,
+    name,
+    clean(d.relationship),
+    normalizeDate(d.dob),
+    ssn ? ctx.cipher.encrypt(ssn, `dependent_ssn:${id}`) : null,
+    ssn ? ssn.slice(-4) : null,
+  );
+  await audit(ctx, { actorType: actor.type, actorId: actor.id, actorLabel: actor.label, action: 'client.dependent_add', entityType: 'dependent', entityId: id, clientId, details: { name, relationship: d.relationship }, ip: actor.ip });
+  return (await ctx.db.one<DependentRow>('SELECT * FROM dependents WHERE id = ?', id))!;
 }
-export function updateDependent(ctx: AppContext, dep: DependentRow, d: { name?: string; relationship?: string | null; dob?: string | null; ssn?: string | null }, actor: Actor) {
+export async function updateDependent(ctx: AppContext, dep: DependentRow, d: { name?: string; relationship?: string | null; dob?: string | null; ssn?: string | null }, actor: Actor) {
   const name = clean(d.name) ?? dep.name;
   const ssn = d.ssn === undefined ? undefined : normalizeSsn(d.ssn);
-  ctx.db
-    .prepare('UPDATE dependents SET name = ?, relationship = ?, dob = ?, ssn_enc = ?, ssn_last4 = ? WHERE id = ?')
-    .run(
-      name,
-      d.relationship === undefined ? dep.relationship : clean(d.relationship),
-      d.dob === undefined ? dep.dob : normalizeDate(d.dob),
-      ssn === undefined ? dep.ssn_enc : ssn ? ctx.cipher.encrypt(ssn, `dependent_ssn:${dep.id}`) : null,
-      ssn === undefined ? dep.ssn_last4 : ssn ? ssn.slice(-4) : null,
-      dep.id,
-    );
-  audit(ctx, { actorType: actor.type, actorId: actor.id, actorLabel: actor.label, action: 'client.dependent_update', entityType: 'dependent', entityId: dep.id, clientId: dep.client_id, details: { name }, ip: actor.ip });
+  await ctx.db.run(
+    'UPDATE dependents SET name = ?, relationship = ?, dob = ?, ssn_enc = ?, ssn_last4 = ? WHERE id = ?',
+    name,
+    d.relationship === undefined ? dep.relationship : clean(d.relationship),
+    d.dob === undefined ? dep.dob : normalizeDate(d.dob),
+    ssn === undefined ? dep.ssn_enc : ssn ? ctx.cipher.encrypt(ssn, `dependent_ssn:${dep.id}`) : null,
+    ssn === undefined ? dep.ssn_last4 : ssn ? ssn.slice(-4) : null,
+    dep.id,
+  );
+  await audit(ctx, { actorType: actor.type, actorId: actor.id, actorLabel: actor.label, action: 'client.dependent_update', entityType: 'dependent', entityId: dep.id, clientId: dep.client_id, details: { name }, ip: actor.ip });
 }
-export function deleteDependent(ctx: AppContext, dep: DependentRow, actor: Actor) {
-  ctx.db.prepare('DELETE FROM dependents WHERE id = ?').run(dep.id);
-  audit(ctx, { actorType: actor.type, actorId: actor.id, actorLabel: actor.label, action: 'client.dependent_delete', entityType: 'dependent', entityId: dep.id, clientId: dep.client_id, details: { name: dep.name }, ip: actor.ip });
+export async function deleteDependent(ctx: AppContext, dep: DependentRow, actor: Actor) {
+  await ctx.db.run('DELETE FROM dependents WHERE id = ?', dep.id);
+  await audit(ctx, { actorType: actor.type, actorId: actor.id, actorLabel: actor.label, action: 'client.dependent_delete', entityType: 'dependent', entityId: dep.id, clientId: dep.client_id, details: { name: dep.name }, ip: actor.ip });
 }
 
 // ---------- Year history ----------
-export function listYearHistory(ctx: AppContext, clientId: string): YearHistoryRow[] {
-  return ctx.db.prepare('SELECT * FROM client_year_history WHERE client_id = ? ORDER BY year DESC').all(clientId) as YearHistoryRow[];
+export function listYearHistory(ctx: AppContext, clientId: string) {
+  return ctx.db.all<YearHistoryRow>('SELECT * FROM client_year_history WHERE client_id = ? ORDER BY year DESC', clientId);
 }
-export function upsertYearHistory(ctx: AppContext, clientId: string, h: { year: number; services?: string | null; fee_cents?: number | null; notes?: string | null }, actor: Actor) {
+export async function upsertYearHistory(ctx: AppContext, clientId: string, h: { year: number; services?: string | null; fee_cents?: number | null; notes?: string | null }, actor: Actor) {
   if (!Number.isInteger(h.year) || h.year < 1950 || h.year > 2100) throw new Error('Invalid year');
-  ctx.db
-    .prepare(
-      `INSERT INTO client_year_history (id, client_id, year, services, fee_cents, notes) VALUES (?, ?, ?, ?, ?, ?)
-       ON CONFLICT(client_id, year) DO UPDATE SET services = excluded.services, fee_cents = excluded.fee_cents, notes = excluded.notes`,
-    )
-    .run(newId(), clientId, h.year, clean(h.services), h.fee_cents ?? null, clean(h.notes));
-  recomputeClientSince(ctx, clientId);
-  audit(ctx, { actorType: actor.type, actorId: actor.id, actorLabel: actor.label, action: 'client.history_upsert', entityType: 'client', entityId: clientId, clientId, details: { year: h.year, services: h.services, fee_cents: h.fee_cents }, ip: actor.ip });
+  await ctx.db.run(
+    `INSERT INTO client_year_history (id, client_id, year, services, fee_cents, notes) VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(client_id, year) DO UPDATE SET services = excluded.services, fee_cents = excluded.fee_cents, notes = excluded.notes`,
+    newId(),
+    clientId,
+    h.year,
+    clean(h.services),
+    h.fee_cents ?? null,
+    clean(h.notes),
+  );
+  await recomputeClientSince(ctx, clientId);
+  await audit(ctx, { actorType: actor.type, actorId: actor.id, actorLabel: actor.label, action: 'client.history_upsert', entityType: 'client', entityId: clientId, clientId, details: { year: h.year, services: h.services, fee_cents: h.fee_cents }, ip: actor.ip });
 }
-export function deleteYearHistory(ctx: AppContext, clientId: string, year: number, actor: Actor) {
-  ctx.db.prepare('DELETE FROM client_year_history WHERE client_id = ? AND year = ?').run(clientId, year);
-  audit(ctx, { actorType: actor.type, actorId: actor.id, actorLabel: actor.label, action: 'client.history_delete', entityType: 'client', entityId: clientId, clientId, details: { year }, ip: actor.ip });
+export async function deleteYearHistory(ctx: AppContext, clientId: string, year: number, actor: Actor) {
+  await ctx.db.run('DELETE FROM client_year_history WHERE client_id = ? AND year = ?', clientId, year);
+  await audit(ctx, { actorType: actor.type, actorId: actor.id, actorLabel: actor.label, action: 'client.history_delete', entityType: 'client', entityId: clientId, clientId, details: { year }, ip: actor.ip });
 }

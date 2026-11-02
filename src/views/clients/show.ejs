@@ -89,13 +89,13 @@
 
 <h2 id="vault">Document vault</h2>
 <% if (can.uploadDocuments(user)) { %>
-<form method="post" action="/clients/<%= client.id %>/documents" enctype="multipart/form-data" class="card row">
+<form method="post" action="/clients/<%= client.id %>/documents/init" class="card row" data-encrypted-upload data-init-url="/clients/<%= client.id %>/documents/init" data-complete-url="/documents/uploads/VERSION_ID/complete">
   <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-  <div><label>File</label><input type="file" name="file" required></div>
+  <div><label>File <small class="help">(encrypted in your browser before upload)</small></label><input type="file" name="file" required></div>
   <div><label>Tax year</label><input type="number" name="tax_year" value="<%= taxYear %>" min="1990" max="2100" required></div>
   <div><label>Category</label><select name="category"><% for (const c of constants.DOCUMENT_CATEGORIES) { %><option><%= c %></option><% } %></select></div>
   <div><label>Title (optional)</label><input type="text" name="title" placeholder="defaults to filename"></div>
-  <div><button type="submit">Upload</button></div>
+  <div><button type="submit">Upload</button> <span class="muted" data-upload-status></span></div>
 </form>
 <% } %>
 <% if (!vault.length) { %><p class="muted">No documents yet.</p><% } %>
@@ -112,7 +112,7 @@
         <td><%= d.latest.uploaded_by_label %> <span class="muted">(<%= d.latest.uploaded_by_type %>)</span></td>
         <td><%= fmtTs(d.latest.uploaded_at) %></td>
         <td><span class="status <%= d.status %>"><%= d.status %></span><% if (d.status === 'rejected') { %><br><small><%= d.rejection_reason %></small><% } %></td>
-        <td><a href="/documents/<%= d.id %>/download">Download</a></td>
+        <td><button type="button" class="secondary" data-download="/documents/<%= d.id %>/download">Download</button></td>
       </tr>
     <% } %>
     </tbody></table>

@@ -37,17 +37,18 @@
 
 <div class="card" id="documents">
   <h3>Upload documents for tax year <%= link.tax_year %></h3>
-  <form method="post" action="/portal/documents" enctype="multipart/form-data">
+  <form method="post" action="/portal/documents/init" data-encrypted-upload data-init-url="/portal/documents/init" data-complete-url="/portal/documents/VERSION_ID/complete">
     <input type="hidden" name="_csrf" value="<%= csrfToken %>">
     <label>File (PDF, photo, Word, Excel — up to 25 MB)</label><input type="file" name="file" required>
     <label>What is it?</label><select name="category"><% for (const c of categories) { %><option><%= c %></option><% } %></select>
-    <label>Description (optional)</label><input type="text" name="description" placeholder="e.g. W-2 from Acme Corp">
-    <p><button type="submit">Upload</button></p>
+    <label>Description (optional)</label><input type="text" name="title" placeholder="e.g. W-2 from Acme Corp">
+    <p><button type="submit">Upload</button> <span class="muted" data-upload-status></span></p>
+    <p class="muted">Files are encrypted in your browser before they leave your device.</p>
   </form>
   <h4>Uploaded so far</h4>
-  <table><thead><tr><th>File</th><th>Category</th><th>Uploaded</th><th>Status</th></tr></thead><tbody>
-  <% for (const d of docs) { %><tr><td><%= d.original_filename %></td><td><%= d.category %></td><td><%= fmtTs(d.uploaded_at) %></td><td><span class="status <%= d.status %>"><%= d.status %></span><% if (d.status === 'rejected') { %> — <%= d.rejection_reason %><% } %></td></tr><% } %>
-  <% if (!docs.length) { %><tr><td colspan="4" class="muted">Nothing uploaded yet.</td></tr><% } %>
+  <table><thead><tr><th>File</th><th>Category</th><th>Uploaded</th><th>Status</th><th></th></tr></thead><tbody>
+  <% for (const d of docs) { %><tr><td><%= d.original_filename %></td><td><%= d.category %></td><td><%= fmtTs(d.uploaded_at) %></td><td><span class="status <%= d.status %>"><%= d.status %></span><% if (d.status === 'rejected') { %> — <%= d.rejection_reason %><% } %></td><td><button type="button" class="secondary" data-download="/portal/documents/<%= d.version_id %>/download">Download</button></td></tr><% } %>
+  <% if (!docs.length) { %><tr><td colspan="5" class="muted">Nothing uploaded yet.</td></tr><% } %>
   </tbody></table>
 </div>
 <%- include('../partials/foot') %>

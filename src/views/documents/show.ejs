@@ -25,17 +25,20 @@
 <% if (can.uploadDocuments(user)) { %>
 <div class="card"><h3>Upload a new version</h3>
 <p class="muted">The current version is kept; both remain downloadable with their timestamps.</p>
-<form method="post" action="/documents/<%= document.id %>/versions" enctype="multipart/form-data">
+<form method="post" action="/clients/<%= client.id %>/documents/init" data-encrypted-upload data-init-url="/clients/<%= client.id %>/documents/init" data-complete-url="/documents/uploads/VERSION_ID/complete">
   <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <input type="hidden" name="replace_document_id" value="<%= document.id %>">
+  <input type="hidden" name="tax_year" value="<%= document.tax_year %>">
+  <input type="hidden" name="category" value="<%= document.category %>">
   <input type="file" name="file" required>
-  <p><button type="submit">Upload version</button></p>
+  <p><button type="submit">Upload version</button> <span class="muted" data-upload-status></span></p>
 </form></div>
 <% } %>
 </div>
 <h2>Versions</h2>
-<table><thead><tr><th>Version</th><th>Original filename</th><th>Size</th><th>Uploaded by</th><th>Uploaded at</th><th>SHA-256</th><th></th></tr></thead><tbody>
+<table><thead><tr><th>Version</th><th>Original filename</th><th>Size</th><th>Uploaded by</th><th>Uploaded at</th><th>SHA-256 (plaintext)</th><th></th></tr></thead><tbody>
 <% for (const v of versions) { %>
-<tr><td>v<%= v.version_no %></td><td><%= v.original_filename %></td><td><%= (v.size_bytes/1024).toFixed(1) %> KB</td><td><%= v.uploaded_by_label %> <span class="muted">(<%= v.uploaded_by_type %>)</span></td><td><%= fmtTs(v.uploaded_at) %></td><td class="mono" style="font-size:0.75rem"><%= v.sha256.slice(0,16) %>…</td><td><a href="/documents/<%= document.id %>/versions/<%= v.id %>/download">Download</a></td></tr>
+<tr><td>v<%= v.version_no %></td><td><%= v.original_filename %></td><td><%= (v.size_bytes/1024).toFixed(1) %> KB</td><td><%= v.uploaded_by_label %> <span class="muted">(<%= v.uploaded_by_type %>)</span></td><td><%= fmtTs(v.uploaded_at) %></td><td class="mono" style="font-size:0.75rem"><%= v.sha256.slice(0,16) %>…</td><td><button type="button" class="secondary" data-download="/documents/<%= document.id %>/versions/<%= v.id %>/download">Download</button></td></tr>
 <% } %>
 </tbody></table>
 <%- include('../partials/foot') %>

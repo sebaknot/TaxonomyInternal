@@ -13,24 +13,21 @@ export interface AuditEntry {
   userAgent?: string | null;
 }
 
-export function audit(ctx: AppContext, e: AuditEntry): void {
-  ctx.db
-    .prepare(
-      `INSERT INTO audit_log (actor_type, actor_id, actor_label, action, entity_type, entity_id, client_id, details, ip, user_agent)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    )
-    .run(
-      e.actorType,
-      e.actorId ?? null,
-      e.actorLabel ?? null,
-      e.action,
-      e.entityType ?? null,
-      e.entityId ?? null,
-      e.clientId ?? null,
-      e.details ? JSON.stringify(e.details) : null,
-      e.ip ?? null,
-      e.userAgent ? String(e.userAgent).slice(0, 500) : null,
-    );
+export async function audit(ctx: AppContext, e: AuditEntry): Promise<void> {
+  await ctx.db.run(
+    `INSERT INTO audit_log (actor_type, actor_id, actor_label, action, entity_type, entity_id, client_id, details, ip, user_agent)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    e.actorType,
+    e.actorId ?? null,
+    e.actorLabel ?? null,
+    e.action,
+    e.entityType ?? null,
+    e.entityId ?? null,
+    e.clientId ?? null,
+    e.details ? JSON.stringify(e.details) : null,
+    e.ip ?? null,
+    e.userAgent ? String(e.userAgent).slice(0, 500) : null,
+  );
 }
 
 export interface AuditRow {
@@ -48,10 +45,10 @@ export interface AuditRow {
   user_agent: string | null;
 }
 
-export function listAudit(
+export async function listAudit(
   ctx: AppContext,
   opts: { clientId?: string; actionPrefix?: string; actorId?: string; limit?: number; offset?: number } = {},
-): { rows: AuditRow[]; total: number } {
+): Promise<{ rows: AuditRow[]; total: number }> {
   const where: string[] = [];
   const params: unknown[] = [];
   if (opts.clientId) {
@@ -67,9 +64,7 @@ export function listAudit(
     params.push(opts.actorId);
   }
   const w = where.length ? 'WHERE ' + where.join(' AND ') : '';
-  const total = (ctx.db.prepare(`SELECT COUNT(*) c FROM audit_log ${w}`).get(...params) as any).c as number;
-  const rows = ctx.db
-    .prepare(`SELECT * FROM audit_log ${w} ORDER BY id DESC LIMIT ? OFFSET ?`)
-    .all(...params, opts.limit ?? 100, opts.offset ?? 0) as AuditRow[];
+  const total = await ctx.db.scalar<number>(`SELECT COUNT(*) FROM audit_log ${w}`, ...params);
+  const rows = await ctx.db.all<AuditRow>(`SELECT * FROM audit_log ${w} ORDER BY id DESC LIMIT ? OFFSET ?`, ...params, opts.limit ?? 100, opts.offset ?? 0);
   return { rows, total };
 }

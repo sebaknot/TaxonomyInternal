@@ -5,10 +5,10 @@ import { startTestApp, Client, seedUser, login, type TestApp } from './helpers.j
 import { suggestMapping } from '../src/services/imports.js';
 
 let app: TestApp;
-let admin: ReturnType<typeof seedUser>;
+let admin: Awaited<ReturnType<typeof seedUser>>;
 before(async () => {
   app = await startTestApp();
-  admin = seedUser(app.ctx, 'admin@example.com', 'admin');
+  admin = await seedUser(app.ctx, 'admin@example.com', 'admin');
 });
 after(async () => app.close());
 
@@ -24,7 +24,7 @@ test('header aliases are auto-suggested', () => {
   assert.equal(m['Weird Column'], 'skip');
 });
 
-test('CSV import with column mapping creates records and reports failed rows', async () => {
+test('CSV import with column mapping creates records and reports failed rows; staged file is encrypted in storage then removed', async () => {
   const c = await login(new Client(app.baseUrl), admin.user.email, admin.secret);
   await c.get('/imports');
   const csv = [
@@ -35,12 +35,16 @@ test('CSV import with column mapping creates records and reports failed rows', a
     'Carla,Diaz,333-44-5555,5/6/88,555-0103,carla@x.com,,zzz',
   ].join('\n');
   const up = await c.upload('/imports', {}, { name: 'taxwise-export.csv', content: csv, type: 'text/csv' });
-  assert.equal(up.status, 302);
+  assert.equal(up.status, 302, up.text);
   const importId = up.location!.split('/').pop()!;
+  const rec = await app.ctx.db.one<{ storage_path: string }>('SELECT storage_path FROM imports WHERE id = ?', importId);
+  const staged = app.storageServer.objects.get(`vault/${rec!.storage_path}`);
+  assert.ok(staged, 'staged copy lives in storage');
+  assert.ok(!staged!.body.includes(Buffer.from('111-22-3333')), 'staged copy is encrypted');
+
   const mapPage = await c.get(`/imports/${importId}`);
   assert.equal(mapPage.status, 200);
   assert.match(mapPage.text, /4 data row\(s\)/);
-  // Suggested mapping is pre-selected; "Ignore" column stays skipped.
   assert.match(mapPage.text, /<option value="first_name" selected>/);
   const run = await c.post(`/imports/${importId}/run`, {
     'map[First]': 'first_name', 'map[Last]': 'last_name', 'map[Social Security]': 'ssn', 'map[DOB]': 'dob', 'map[Phone]': 'phone', 'map[Email]': 'email', 'map[Tags]': 'tags', 'map[Ignore]': 'skip',
@@ -51,18 +55,15 @@ test('CSV import with column mapping creates records and reports failed rows', a
   assert.match(summary.text, /<h3>2<\/h3>row\(s\) failed/);
   assert.match(summary.text, /<td>3<\/td><td><\/td><td>Missing required field: legal name/);
   assert.match(summary.text, /<td>4<\/td><td>Bob Reyes<\/td><td>SSN must have 9 digits/);
-  const ana = app.ctx.db.prepare("SELECT * FROM clients WHERE legal_name = 'Ana Lopez'").get() as any;
+  const ana = await app.ctx.db.one<any>("SELECT * FROM clients WHERE legal_name = 'Ana Lopez'");
   assert.equal(ana.ssn_last4, '3333');
   assert.equal(ana.dob, '1975-03-04');
   assert.equal(ana.created_via, 'import');
-  const carla = app.ctx.db.prepare("SELECT * FROM clients WHERE legal_name = 'Carla Diaz'").get() as any;
+  const carla = await app.ctx.db.one<any>("SELECT * FROM clients WHERE legal_name = 'Carla Diaz'");
   assert.equal(carla.dob, '1988-05-06');
-  const tags = app.ctx.db.prepare('SELECT t.name FROM client_tags ct JOIN tags t ON t.id = ct.tag_id WHERE ct.client_id = ? ORDER BY t.name').all(ana.id) as any[];
+  const tags = await app.ctx.db.all<{ name: string }>('SELECT t.name FROM client_tags ct JOIN tags t ON t.id = ct.tag_id WHERE ct.client_id = ? ORDER BY t.name', ana.id);
   assert.deepEqual(tags.map((t) => t.name), ['Crypto', 'Real Estate']);
-  // Staged file with SSNs removed after the run.
-  const rec = app.ctx.db.prepare('SELECT stored_name FROM imports WHERE id = ?').get(importId) as any;
-  const fs = await import('node:fs');
-  assert.ok(!fs.existsSync(`${app.ctx.importsDir}/${rec.stored_name}`));
+  assert.ok(!app.storageServer.objects.has(`vault/${rec!.storage_path}`), 'staged file removed after the run');
 });
 
 test('Excel import works and requires a name mapping', async () => {
@@ -82,7 +83,7 @@ test('Excel import works and requires a name mapping', async () => {
   assert.match(noName.text, /Map a column to (&#34;|")Legal name/);
   const run = await c.post(`/imports/${importId}/run`, { 'map[Client Name]': 'legal_name', 'map[SSN]': 'ssn', 'map[Date of Birth]': 'dob', 'map[City]': 'city' });
   assert.equal(run.status, 302);
-  const dora = app.ctx.db.prepare("SELECT * FROM clients WHERE legal_name = 'Dora Explorer'").get() as any;
+  const dora = await app.ctx.db.one<any>("SELECT * FROM clients WHERE legal_name = 'Dora Explorer'");
   assert.equal(dora.dob, '1970-07-08');
   assert.equal(dora.city, 'Miami');
   assert.equal(dora.ssn_last4, '6666');

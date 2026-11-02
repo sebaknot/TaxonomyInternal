@@ -19,9 +19,11 @@ if (!email || !name || !password || !ROLES.includes(role)) {
 }
 const ctx = createContext(loadConfig());
 try {
-  const u = createUser(ctx, { email, name, role, password }, null);
+  const u = await createUser(ctx, { email, name, role, password }, null);
   console.log(`Created ${u.role} ${u.email} (${u.id}). They will enroll two-factor authentication at first sign-in.`);
 } catch (err) {
   console.error((err as Error).message);
-  process.exit(1);
+  process.exitCode = 1;
+} finally {
+  await ctx.db.close();
 }
