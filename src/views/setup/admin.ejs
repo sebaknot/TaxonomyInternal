@@ -1,0 +1,13 @@
+<%- include('../partials/head') %>
+<h1>Create the first administrator</h1>
+<p>This account gets the Owner/Admin role. Next you will enroll an authenticator app (required) and receive backup codes.</p>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<form method="post" action="/setup/admin" style="max-width:480px">
+  <input type="hidden" name="_setup" value="<%= unlock %>">
+  <label>Full name</label><input type="text" name="name" required value="<%= form.name || '' %>">
+  <label>Email (used to sign in)</label><input type="email" name="email" required value="<%= form.email || '' %>" autocomplete="username">
+  <label>Password (12+ characters, letters and numbers)</label><input type="password" name="password" required autocomplete="new-password">
+  <label>Confirm password</label><input type="password" name="confirm" required autocomplete="new-password">
+  <p><button type="submit">Create administrator and continue to two-factor setup</button></p>
+</form>
+<%- include('../partials/foot') %>
