@@ -160,7 +160,7 @@ export interface TestApp {
   close: () => Promise<void>;
 }
 
-export async function startTestApp(): Promise<TestApp> {
+export async function startTestApp(opts: { bootstrapToken?: string } = {}): Promise<TestApp> {
   const database = await createTestDatabase();
   const storageServer = await new FakeSupabaseStorageServer().start();
   const config: AppConfig = {
@@ -177,6 +177,8 @@ export async function startTestApp(): Promise<TestApp> {
     cookieSecure: false,
     trustProxy: false,
     cronSecret: 'cron-test-secret',
+    bootstrapToken: opts.bootstrapToken,
+    directDatabaseUrl: database.url,
   };
   const db = DB.fromUrl(config.databaseUrl, { max: config.dbPoolMax });
   await migrate(db);
