@@ -1,5 +1,6 @@
-import fs from 'node:fs';
 import path from 'node:path';
+import os from 'node:os';
+import fs from 'node:fs';
 import { parse } from 'csv-parse/sync';
 import ExcelJS from 'exceljs';
 import type { AppContext } from '../context.js';
@@ -7,6 +8,8 @@ import { newId, randomToken } from '../lib/crypto.js';
 import { audit } from './audit.js';
 import { createClient, type ClientInput } from './clients.js';
 import type { SessionUser } from './permissions.js';
+import { encryptForUpload, decryptDownloaded } from './documents.js';
+import crypto from 'node:crypto';
 
 /** Client fields that an import can populate, with header aliases (TaxWise-style and common variants). */
 export const IMPORT_FIELDS: { key: keyof ClientInput | 'first_name' | 'last_name' | 'skip'; label: string; required?: boolean; aliases: string[] }[] = [
@@ -71,10 +74,11 @@ function cellToString(v: unknown): string {
   return String(v);
 }
 
-export async function parseSpreadsheet(filePath: string, originalName: string): Promise<ParsedSheet> {
+/** Parses a CSV or XLSX from memory. XLSX goes through a private temp file (exceljs streams from disk). */
+export async function parseSpreadsheet(content: Buffer, originalName: string): Promise<ParsedSheet> {
   const ext = path.extname(originalName).toLowerCase();
   if (ext === '.csv' || ext === '.txt' || ext === '.tsv') {
-    const text = fs.readFileSync(filePath, 'utf8').replace(/^\uFEFF/, '');
+    const text = content.toString('utf8').replace(/^\uFEFF/, '');
     const records: string[][] = parse(text, { bom: true, skip_empty_lines: true, relax_column_count: true, delimiter: ext === '.tsv' ? '\t' : [',', ';', '\t'], trim: true });
     if (!records.length) throw new Error('The file is empty');
     const headers = records[0].map((h, i) => (h?.trim() ? h.trim() : `Column ${i + 1}`));
@@ -83,7 +87,13 @@ export async function parseSpreadsheet(filePath: string, originalName: string): 
   }
   if (ext === '.xlsx' || ext === '.xlsm') {
     const wb = new ExcelJS.Workbook();
-    await wb.xlsx.readFile(filePath);
+    const tmp = path.join(os.tmpdir(), `tx-import-${randomToken(8)}.xlsx`);
+    fs.writeFileSync(tmp, content, { mode: 0o600 });
+    try {
+      await wb.xlsx.readFile(tmp);
+    } finally {
+      fs.rmSync(tmp, { force: true });
+    }
     const ws = wb.worksheets[0];
     if (!ws) throw new Error('The workbook has no sheets');
     const headers: string[] = [];
@@ -109,7 +119,8 @@ export interface ImportRow {
   id: string;
   created_by: string;
   original_filename: string;
-  stored_name: string;
+  storage_path: string;
+  data_key_enc: string;
   headers: string;
   row_count: number;
   mapping: string | null;
@@ -119,41 +130,47 @@ export interface ImportRow {
   completed_at: string | null;
 }
 
-/** Stage an uploaded file: parse, store a copy, suggest a mapping. */
-export async function stageImport(ctx: AppContext, tempPath: string, originalName: string, actor: SessionUser): Promise<{ record: ImportRow; sheet: ParsedSheet; suggested: Record<string, string> }> {
-  const sheet = await parseSpreadsheet(tempPath, originalName);
-  const storedName = randomToken(16) + path.extname(originalName).toLowerCase();
-  fs.mkdirSync(ctx.importsDir, { recursive: true });
-  // Staged copy is encrypted at rest like documents (it may contain SSNs).
-  const raw = fs.readFileSync(tempPath);
-  fs.writeFileSync(path.join(ctx.importsDir, storedName), ctx.cipher.encrypt(raw.toString('base64'), 'import'), { mode: 0o600 });
-  fs.rmSync(tempPath, { force: true });
+/** Stage an uploaded file: parse, store an encrypted copy in Storage, suggest a mapping. */
+export async function stageImport(ctx: AppContext, content: Buffer, originalName: string, actor: SessionUser): Promise<{ record: ImportRow; sheet: ParsedSheet; suggested: Record<string, string> }> {
+  const sheet = await parseSpreadsheet(content, originalName);
   const id = newId();
-  ctx.db
-    .prepare('INSERT INTO imports (id, created_by, original_filename, stored_name, headers, row_count) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(id, actor.id, path.basename(originalName), storedName, JSON.stringify(sheet.headers), sheet.rows.length);
-  audit(ctx, { actorType: 'user', actorId: actor.id, actorLabel: actor.email, action: 'import.stage', entityType: 'import', entityId: id, details: { filename: originalName, rows: sheet.rows.length } });
-  return { record: getImport(ctx, id)!, sheet, suggested: suggestMapping(sheet.headers) };
+  const key = crypto.randomBytes(32);
+  const iv = crypto.randomBytes(12);
+  const storagePath = `imports/${id}${path.extname(originalName).toLowerCase()}.bin`;
+  const { ciphertext } = encryptForUpload(content, key, iv);
+  await ctx.storage.put(storagePath, ciphertext);
+  await ctx.db.run(
+    'INSERT INTO imports (id, created_by, original_filename, storage_path, data_key_enc, headers, row_count) VALUES (?, ?, ?, ?, ?, ?, ?)',
+    id,
+    actor.id,
+    path.basename(originalName),
+    storagePath,
+    ctx.cipher.encrypt(`${key.toString('base64')}:${iv.toString('base64')}`, `importkey:${id}`),
+    JSON.stringify(sheet.headers),
+    sheet.rows.length,
+  );
+  await audit(ctx, { actorType: 'user', actorId: actor.id, actorLabel: actor.email, action: 'import.stage', entityType: 'import', entityId: id, details: { filename: originalName, rows: sheet.rows.length } });
+  return { record: (await getImport(ctx, id))!, sheet, suggested: suggestMapping(sheet.headers) };
 }
 
-export function getImport(ctx: AppContext, id: string): ImportRow | undefined {
-  return ctx.db.prepare('SELECT * FROM imports WHERE id = ?').get(id) as ImportRow | undefined;
+export function getImport(ctx: AppContext, id: string) {
+  return ctx.db.one<ImportRow>('SELECT * FROM imports WHERE id = ?', id);
 }
-export function listImports(ctx: AppContext): (ImportRow & { creator: string })[] {
-  return ctx.db.prepare('SELECT i.*, u.name creator FROM imports i JOIN users u ON u.id = i.created_by ORDER BY i.created_at DESC LIMIT 100').all() as any;
+export function listImports(ctx: AppContext) {
+  return ctx.db.all<ImportRow & { creator: string }>('SELECT i.*, u.name creator FROM imports i JOIN users u ON u.id = i.created_by ORDER BY i.created_at DESC LIMIT 100');
 }
 
 export async function loadStagedSheet(ctx: AppContext, record: ImportRow): Promise<ParsedSheet> {
-  const encPath = path.join(ctx.importsDir, record.stored_name);
-  if (!fs.existsSync(encPath)) throw new Error('The staged file is no longer available. Upload it again.');
-  const raw = Buffer.from(ctx.cipher.decrypt(fs.readFileSync(encPath, 'utf8'), 'import'), 'base64');
-  const tmp = path.join(ctx.importsDir, `tmp-${randomToken(8)}${path.extname(record.original_filename).toLowerCase()}`);
-  fs.writeFileSync(tmp, raw, { mode: 0o600 });
+  if (record.status === 'completed') throw new Error('The staged file was removed after the import ran. Upload it again.');
+  let ciphertext: Uint8Array;
   try {
-    return await parseSpreadsheet(tmp, record.original_filename);
-  } finally {
-    fs.rmSync(tmp, { force: true });
+    ciphertext = await ctx.storage.get(record.storage_path);
+  } catch {
+    throw new Error('The staged file is no longer available. Upload it again.');
   }
+  const [k, i] = ctx.cipher.decrypt(record.data_key_enc, `importkey:${record.id}`).split(':');
+  const content = decryptDownloaded(Buffer.from(ciphertext), Buffer.from(k, 'base64'), Buffer.from(i, 'base64'));
+  return parseSpreadsheet(content, record.original_filename);
 }
 
 export interface ImportSummary {
@@ -170,11 +187,13 @@ export async function runImport(ctx: AppContext, record: ImportRow, mapping: Rec
   if (!mappedKeys.has('legal_name') && !(mappedKeys.has('first_name') || mappedKeys.has('last_name'))) {
     throw new Error('Map a column to "Legal name" (or First name / Last name) before importing.');
   }
-  sheet.rows.forEach((row, i) => {
+  for (let i = 0; i < sheet.rows.length; i++) {
+    const row = sheet.rows[i];
     const rowNo = i + 2; // 1-based, after the header row
     const input: Record<string, unknown> = {};
     let first = '';
     let last = '';
+    let rowError: string | null = null;
     for (const [header, key] of Object.entries(mapping)) {
       if (key === 'skip' || !(header in row)) continue;
       const value = row[header];
@@ -183,29 +202,28 @@ export async function runImport(ctx: AppContext, record: ImportRow, mapping: Rec
       else if (key === 'tags') input.tags = value.split(/[,;|]/).map((t) => t.trim()).filter(Boolean);
       else if (key === 'client_since_year') {
         const y = parseInt(value, 10);
-        if (value && !Number.isFinite(y)) {
-          summary.failed++;
-          summary.errors.push({ row: rowNo, message: `Invalid "client since" year: ${value}` });
-          return;
-        }
+        if (value && !Number.isFinite(y)) rowError = `Invalid "client since" year: ${value}`;
         input.client_since_year = value ? y : null;
       } else input[key] = value;
     }
     if (!input.legal_name) input.legal_name = [first, last].filter(Boolean).join(' ').trim();
     try {
+      if (rowError) throw new Error(rowError);
       if (!String(input.legal_name || '').trim()) throw new Error('Missing required field: legal name');
-      createClient(ctx, input as unknown as ClientInput, { type: 'user', id: actor.id, label: actor.email, ip }, 'import');
+      await createClient(ctx, input as unknown as ClientInput, { type: 'user', id: actor.id, label: actor.email, ip }, 'import');
       summary.created++;
     } catch (err) {
       summary.failed++;
       summary.errors.push({ row: rowNo, message: (err as Error).message, name: String(input.legal_name || '') });
     }
-  });
-  ctx.db
-    .prepare("UPDATE imports SET mapping = ?, status = 'completed', summary = ?, completed_at = datetime('now') WHERE id = ?")
-    .run(JSON.stringify(mapping), JSON.stringify(summary), record.id);
-  // The staged file (with SSNs) is not needed after a run; remove it.
-  fs.rmSync(path.join(ctx.importsDir, record.stored_name), { force: true });
-  audit(ctx, { actorType: 'user', actorId: actor.id, actorLabel: actor.email, action: 'import.run', entityType: 'import', entityId: record.id, details: { created: summary.created, failed: summary.failed }, ip });
+  }
+  await ctx.db.run("UPDATE imports SET mapping = ?, status = 'completed', summary = ?, completed_at = now() WHERE id = ?", JSON.stringify(mapping), JSON.stringify(summary), record.id);
+  // The staged file (with SSNs) is not needed after a run; remove it from storage.
+  try {
+    await ctx.storage.remove([record.storage_path]);
+  } catch (err) {
+    console.error('import cleanup: storage remove failed', err);
+  }
+  await audit(ctx, { actorType: 'user', actorId: actor.id, actorLabel: actor.email, action: 'import.run', entityType: 'import', entityId: record.id, details: { created: summary.created, failed: summary.failed }, ip });
   return summary;
 }

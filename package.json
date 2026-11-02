@@ -5,11 +5,14 @@
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "node dist/src/server.js",
-    "build": "tsc -p tsconfig.build.json && cp -r src/views src/public dist/src/",
+    "build": "tsc -p tsconfig.build.json && cp -r src/views dist/src/",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "tsx --test tests/*.test.ts",
+    "db:migrate": "tsx scripts/db-migrate.ts",
+    "storage:setup": "tsx scripts/storage-setup.ts",
     "gen-keys": "tsx scripts/gen-keys.ts",
-    "create-user": "tsx scripts/create-user.ts"
+    "create-user": "tsx scripts/create-user.ts",
+    "vercel-build": "npm run build && npm run db:migrate"
   },
   "repository": {
     "type": "git",
@@ -23,7 +26,6 @@
   },
   "homepage": "https://github.com/sebaknot/TaxonomyInternal#readme",
   "dependencies": {
-    "better-sqlite3": "^13.0.3",
     "csv-parse": "^7.0.2",
     "dotenv": "^17.4.2",
     "ejs": "^6.0.1",
@@ -33,16 +35,17 @@
     "helmet": "^8.3.0",
     "multer": "^2.3.0",
     "nodemailer": "^10.0.9",
+    "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "zod": "^4.6.4"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^9.6.0",
     "@types/ejs": "^3.1.5",
     "@types/express": "^5.0.6",
     "@types/multer": "^2.2.0",
     "@types/node": "^22.20.2",
     "@types/nodemailer": "^8.0.1",
+    "@types/pg": "^8.23.1",
     "@types/qrcode": "^1.5.6",
     "tsx": "^4.23.13",
     "typescript": "^7.0.2"

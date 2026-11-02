@@ -23,13 +23,13 @@ export function createMailer(db: DB, config: AppConfig): Mailer {
   return {
     async send(to, subject, body) {
       const id = newId();
-      db.prepare('INSERT INTO email_outbox (id, to_addr, subject, body) VALUES (?, ?, ?, ?)').run(id, to, subject, body);
+      await db.run('INSERT INTO email_outbox (id, to_addr, subject, body) VALUES (?, ?, ?, ?)', id, to, subject, body);
       if (!transport) return;
       try {
         await transport.sendMail({ from: config.smtp!.from, to, subject, text: body });
-        db.prepare("UPDATE email_outbox SET sent_at = datetime('now') WHERE id = ?").run(id);
+        await db.run('UPDATE email_outbox SET sent_at = now() WHERE id = ?', id);
       } catch (err) {
-        db.prepare('UPDATE email_outbox SET error = ? WHERE id = ?').run(String(err), id);
+        await db.run('UPDATE email_outbox SET error = ? WHERE id = ?', String(err), id);
       }
     },
   };

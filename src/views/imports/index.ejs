@@ -1,6 +1,6 @@
 <%- include('../partials/head') %>
 <h1>Bulk client import</h1>
-<p>Upload a CSV or Excel (.xlsx) export — for example from TaxWise. The first row must contain column headers. On the next screen you map each column to a client field; rows that fail are reported so you can fix and re-import them.</p>
+<p>Upload a CSV or Excel (.xlsx) export — for example from TaxWise. The first row must contain column headers. Files up to 4 MB are accepted; split larger exports. On the next screen you map each column to a client field; rows that fail are reported so you can fix and re-import them.</p>
 <form method="post" action="/imports" enctype="multipart/form-data" class="card row">
   <input type="hidden" name="_csrf" value="<%= csrfToken %>">
   <div><label>Spreadsheet</label><input type="file" name="file" accept=".csv,.xlsx,.tsv,.txt" required></div>
