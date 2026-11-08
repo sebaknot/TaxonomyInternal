@@ -28,4 +28,6 @@
 <% } %>
 </header>
 <main>
+<% if (user && user.role === 'admin' && typeof smtpConfigured !== 'undefined' && !smtpConfigured && currentPath.startsWith('/admin')) { %><div class="flash error">Email is not configured — messages are not being delivered. <a href="/admin/settings">Settings</a></div><% } %>
+<% if (typeof mustChangePassword !== 'undefined' && mustChangePassword && user) { %><div class="flash info">You must choose a new password before continuing.</div><% } %>
 <% for (const f of flashes) { %><div class="flash <%= f.type %>"><%= f.message %></div><% } %>

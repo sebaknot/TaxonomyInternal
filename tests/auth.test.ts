@@ -85,21 +85,48 @@ test('idle timeout signs the user out and is configurable by admin', async () =>
   await setSetting(app.ctx, 'session_idle_minutes', '15');
 });
 
-test('login from a new device / location raises an admin alert and email', async () => {
+test('first login raises no alert; a later login from a new device does, with an email', async () => {
   const { user, secret } = await seedUser(app.ctx, 'alerts@example.com', 'preparer');
+  const first = new Client(app.baseUrl);
+  await login(first, user.email, secret);
+  assert.equal(await app.ctx.db.scalar('SELECT COUNT(*) FROM admin_alerts WHERE user_id = ?', user.id), 0, 'very first login is the baseline, not an alert');
+  assert.equal(await app.ctx.db.scalar('SELECT COUNT(*) FROM user_devices WHERE user_id = ?', user.id), 1);
+  // Same device again: still nothing.
+  const deviceCookie = first.cookies.get('tx_device')!;
+  await first.post('/logout');
+  const same = new Client(app.baseUrl);
+  same.cookies.set('tx_device', deviceCookie);
+  await login(same, user.email, secret);
+  assert.equal(await app.ctx.db.scalar('SELECT COUNT(*) FROM admin_alerts WHERE user_id = ?', user.id), 0);
+  // A brand-new device (no device cookie) after the baseline: alert + email to admins.
   await login(new Client(app.baseUrl), user.email, secret);
   const alerts = await app.ctx.db.all<{ message: string }>('SELECT * FROM admin_alerts WHERE user_id = ?', user.id);
   assert.equal(alerts.length, 1);
   assert.match(alerts[0].message, /new device/);
-  const c = new Client(app.baseUrl);
-  await login(c, user.email, secret);
-  const deviceCookie = c.cookies.get('tx_device')!;
-  await c.post('/logout');
-  const again = new Client(app.baseUrl);
-  again.cookies.set('tx_device', deviceCookie);
-  await login(again, user.email, secret);
-  assert.equal(await app.ctx.db.scalar('SELECT COUNT(*) FROM admin_alerts WHERE user_id = ?', user.id), 2);
   assert.ok((await app.ctx.db.scalar<number>("SELECT COUNT(*) FROM email_outbox WHERE subject LIKE '%Security alert%'")) >= 1);
+});
+
+test('acknowledging an alert records who and when, is audited, and removes it from the open count', async () => {
+  const admin = await seedUser(app.ctx, 'ackadmin@example.com', 'admin');
+  const { user, secret } = await seedUser(app.ctx, 'acker@example.com', 'intake');
+  await login(new Client(app.baseUrl), user.email, secret);
+  await login(new Client(app.baseUrl), user.email, secret); // second device -> alert
+  const alert = await app.ctx.db.one<{ id: string }>('SELECT id FROM admin_alerts WHERE user_id = ?', user.id);
+  assert.ok(alert);
+  const ac = await login(new Client(app.baseUrl), admin.user.email, admin.secret);
+  const openBefore = await app.ctx.db.scalar<number>('SELECT COUNT(*) FROM admin_alerts WHERE acknowledged_at IS NULL');
+  const before = await ac.get('/admin');
+  assert.match(before.text, new RegExp(`${openBefore} open`));
+  await ac.get('/admin/alerts');
+  assert.equal((await ac.post(`/admin/alerts/${alert!.id}/ack`)).status, 302);
+  const row = await app.ctx.db.one<{ acknowledged_at: string; acknowledged_by: string }>('SELECT acknowledged_at, acknowledged_by FROM admin_alerts WHERE id = ?', alert!.id);
+  assert.ok(row!.acknowledged_at);
+  assert.equal(row!.acknowledged_by, admin.user.email);
+  assert.equal(await app.ctx.db.scalar("SELECT COUNT(*) FROM audit_log WHERE action = 'alert.acknowledge' AND entity_id = ?", alert!.id), 1);
+  const after = await ac.get('/admin');
+  assert.doesNotMatch(after.text, new RegExp(`${openBefore} open`));
+  assert.equal(await app.ctx.db.scalar('SELECT COUNT(*) FROM admin_alerts WHERE acknowledged_at IS NULL'), openBefore - 1);
+  assert.equal(await app.ctx.db.scalar('SELECT COUNT(*) FROM admin_alerts WHERE acknowledged_at IS NULL AND user_id = ?', user.id), 0);
 });
 
 test('admin can revoke one user instantly; their live session dies and login is refused', async () => {

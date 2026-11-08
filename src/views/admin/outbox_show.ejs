@@ -1,6 +1,6 @@
 <%- include('../partials/head') %>
 <h1><%= email.subject %></h1>
-<p class="muted">To <%= email.to_addr %> · <%= email.ts %> UTC · <%= email.sent_at ? 'delivered ' + email.sent_at : 'not delivered' %></p>
+<p class="muted">To <%= email.to_addr %> · <%= email.ts %> UTC · status: <%= email.status %> (<%= email.attempts %> attempt(s))<%= email.sent_at ? ', delivered ' + email.sent_at : '' %><% if (email.last_error) { %> · last error: <span class="mono"><%= email.last_error %></span><% } %></p>
 <pre class="card" style="white-space:pre-wrap"><%= email.body %></pre>
 <p><a href="/admin/outbox">← Outbox</a></p>
 <%- include('../partials/foot') %>

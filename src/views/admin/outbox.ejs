@@ -1,7 +1,16 @@
 <%- include('../partials/head') %>
 <h1>Email outbox</h1>
-<p class="muted"><%= smtpConfigured ? 'SMTP is configured; messages are delivered and recorded here.' : 'SMTP is not configured: messages are recorded here only and NOT delivered. Configure SMTP_* in .env to send email.' %></p>
-<table><thead><tr><th>When (UTC)</th><th>To</th><th>Subject</th><th>Delivered</th></tr></thead><tbody>
-<% for (const e of emails) { %><tr><td><%= e.ts %></td><td><%= e.to_addr %></td><td><a href="/admin/outbox/<%= e.id %>"><%= e.subject %></a></td><td><%= e.sent_at || (e.error ? 'ERROR: ' + e.error : 'not sent (no SMTP)') %></td></tr><% } %>
+<p class="muted"><%= smtpConfigured ? 'SMTP is configured. Every message is recorded here with its delivery status.' : 'SMTP is not configured: messages are recorded here only and NOT delivered. Set SMTP_HOST (and related variables) to send email.' %></p>
+<table><thead><tr><th>When (UTC)</th><th>To</th><th>Subject</th><th>Status</th><th>Attempts</th><th>Last error</th><th></th></tr></thead><tbody>
+<% for (const e of emails) { %>
+<tr>
+  <td><%= e.ts %></td><td><%= e.to_addr %></td><td><a href="/admin/outbox/<%= e.id %>"><%= e.subject %></a></td>
+  <td><span class="status <%= e.status === 'sent' ? 'accepted' : e.status === 'failed' ? 'rejected' : 'uploaded' %>"><%= e.status %></span><% if (e.sent_at) { %><br><small class="muted"><%= e.sent_at %></small><% } %></td>
+  <td><%= e.attempts %></td>
+  <td class="mono" style="font-size:0.75rem"><%= e.last_error || '' %></td>
+  <td><% if (e.status !== 'sent') { %><form method="post" action="/admin/outbox/<%= e.id %>/retry"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="secondary" <%= smtpConfigured ? '' : 'disabled title="Email is not configured"' %>>Retry</button></form><% } %></td>
+</tr>
+<% } %>
+<% if (!emails.length) { %><tr><td colspan="7" class="muted">No messages yet.</td></tr><% } %>
 </tbody></table>
 <%- include('../partials/foot') %>

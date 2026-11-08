@@ -124,6 +124,8 @@ export function baseMiddleware(ctx: AppContext): RequestHandler {
     res.locals.firmName = settings.firm_name;
     res.locals.settings = settings;
     res.locals.csrfToken = req.staffSession?.csrf_token ?? req.portalSession?.csrf_token ?? '';
+    res.locals.smtpConfigured = ctx.mailer.configured;
+    res.locals.mustChangePassword = !!req.staffUser?.must_change_password;
     res.locals.currentPath = req.path;
     next();
   });
@@ -131,7 +133,14 @@ export function baseMiddleware(ctx: AppContext): RequestHandler {
 
 /** Requires a fully authenticated staff user (password + MFA). */
 export function requireAuth(req: Request, res: Response, next: NextFunction) {
-  if (req.user) return next();
+  if (req.user) {
+    // A temporary (admin-issued) password must be replaced before anything else is reachable.
+    if (req.staffUser?.must_change_password && !req.originalUrl.startsWith('/account/password') && !req.originalUrl.startsWith('/logout')) {
+      if (req.accepts(['html', 'json']) === 'json') return res.status(403).json({ error: 'Password change required' });
+      return res.redirect('/account/password');
+    }
+    return next();
+  }
   if (req.staffSession && !req.staffSession.mfa_passed) return res.redirect('/mfa');
   if (req.accepts(['html', 'json']) === 'json') return res.status(401).json({ error: 'Sign in required' });
   const nextUrl = req.method === 'GET' ? `?next=${encodeURIComponent(req.originalUrl)}` : '';

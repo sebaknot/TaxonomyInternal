@@ -1,0 +1,10 @@
+<%- include('../partials/head') %>
+<h1>First-time setup</h1>
+<p>This deployment has no users yet. Enter the bootstrap token you set as <span class="mono">BOOTSTRAP_TOKEN</span> in the Vercel environment to create the first Owner/Admin account.</p>
+<% if (error) { %><div class="flash error"><%= error %></div><% } %>
+<form method="post" action="/setup/token" style="max-width:480px" autocomplete="off">
+  <label>Bootstrap token</label><input type="password" name="token" required autofocus autocomplete="off">
+  <p><button type="submit">Continue</button></p>
+</form>
+<p class="muted">This page disappears permanently as soon as the first user exists. After setup, remove <span class="mono">BOOTSTRAP_TOKEN</span> from the environment.</p>
+<%- include('../partials/foot') %>

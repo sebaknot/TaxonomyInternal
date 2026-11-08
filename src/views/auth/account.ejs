@@ -1,13 +1,9 @@
 <%- include('../partials/head') %>
 <h1>My account</h1>
-<dl><dt>Name</dt><dd><%= user.name %></dd><dt>Email</dt><dd><%= user.email %></dd><dt>Role</dt><dd><%= roleLabels[user.role] %></dd></dl>
-<h2>Change password</h2>
-<% if (error) { %><div class="flash error"><%= error %></div><% } %>
-<form method="post" action="/account/password" style="max-width:420px">
-  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
-  <label>Current password</label><input type="password" name="current" required autocomplete="current-password">
-  <label>New password (12+ characters, letters and numbers)</label><input type="password" name="password" required autocomplete="new-password">
-  <label>Confirm new password</label><input type="password" name="confirm" required autocomplete="new-password">
-  <p><button type="submit">Change password</button></p>
-</form>
+<dl><dt>Name</dt><dd><%= user.name %></dd><dt>Email</dt><dd><%= user.email %></dd><dt>Role</dt><dd><%= roleLabels[user.role] %></dd><dt>Active sessions</dt><dd><%= sessions %> (including this one)</dd></dl>
+<div class="grid">
+  <div class="card"><h3>Password</h3><p>Changing your password requires your current password and a code from your authenticator app. All other sessions are signed out.</p><a class="btn" href="/account/password">Change password</a></div>
+  <div class="card"><h3>Sign out of all devices</h3><p>Ends every other session for your account. This browser stays signed in.</p>
+    <form method="post" action="/account/sessions/revoke-others" data-confirm="Sign out every other session for your account?"><input type="hidden" name="_csrf" value="<%= csrfToken %>"><button class="secondary">Sign out of all other devices</button></form></div>
+</div>
 <%- include('../partials/foot') %>

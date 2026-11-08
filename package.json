@@ -12,7 +12,7 @@
     "storage:setup": "tsx scripts/storage-setup.ts",
     "gen-keys": "tsx scripts/gen-keys.ts",
     "create-user": "tsx scripts/create-user.ts",
-    "vercel-build": "npm run build && npm run db:migrate"
+    "vercel-build": "npm run build && npm run db:migrate && npm run storage:setup"
   },
   "repository": {
     "type": "git",
@@ -56,6 +56,6 @@
   "private": true,
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
   }
 }

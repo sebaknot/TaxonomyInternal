@@ -17,6 +17,8 @@ import { documentsRouter } from './routes/documents.js';
 import { adminRouter } from './routes/admin.js';
 import { importsRouter } from './routes/imports.js';
 import { portalRouter } from './routes/portal.js';
+import { healthRouter } from './routes/health.js';
+import { setupRouter } from './routes/setup.js';
 import { DOCUMENT_CATEGORIES, DOCUMENT_STATUSES, FILING_STATUSES, CLIENT_SOURCES, ROLES } from './lib/constants.js';
 import { safeEqual } from './lib/crypto.js';
 
@@ -68,6 +70,7 @@ export function createApp(ctx: AppContext) {
   app.use(express.json({ limit: '256kb' }));
 
   app.get('/healthz', (_req, res) => res.json({ ok: true }));
+  app.use(healthRouter(ctx));
   // Scheduled maintenance (Vercel Cron sends Authorization: Bearer <CRON_SECRET>).
   app.get(
     '/api/cron/cleanup',
@@ -83,6 +86,7 @@ export function createApp(ctx: AppContext) {
   app.use(baseMiddleware(ctx));
   app.use(csrfProtection);
 
+  app.use('/', setupRouter(ctx));
   app.use('/', authRouter(ctx));
   app.use('/portal', portalRouter(ctx));
   app.use(requireAuth);

@@ -5,13 +5,9 @@
   "functions": {
     "api/index.js": {
       "includeFiles": "dist/src/views/**",
-      "maxDuration": 30,
-      "memory": 1024
+      "maxDuration": 30
     }
   },
-  "rewrites": [
-    { "source": "/static/(.*)", "destination": "/static/$1" },
-    { "source": "/(.*)", "destination": "/api" }
-  ],
+  "rewrites": [{ "source": "/(.*)", "destination": "/api" }],
   "crons": [{ "path": "/api/cron/cleanup", "schedule": "0 4 * * *" }]
 }
