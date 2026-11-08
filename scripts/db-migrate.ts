@@ -8,6 +8,12 @@ import 'dotenv/config';
 import { DB, migrate } from '../src/lib/db.js';
 
 const url = process.env.DIRECT_DATABASE_URL || process.env.DATABASE_URL;
+// Vercel Preview deployments (pull requests) must not touch the production database, and usually
+// have no database variables at all. Skip unless explicitly opted in; the build still succeeds.
+if (process.env.VERCEL_ENV === 'preview' && process.env.MIGRATE_ON_PREVIEW !== 'true') {
+  console.log('Vercel preview deployment: skipping database migrations (set MIGRATE_ON_PREVIEW=true to run them).');
+  process.exit(0);
+}
 if (!url) {
   console.error('DATABASE_URL (or DIRECT_DATABASE_URL) is not set.');
   process.exit(1);

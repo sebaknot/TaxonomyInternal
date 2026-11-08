@@ -77,6 +77,7 @@ Supabase therefore only ever stores ciphertext and wrapped keys; SSNs, MFA secre
 - `maxDuration` is 30 s, within every plan's limit. No `memory` override is set so the config is valid on Hobby.
 - The cleanup cron runs **once a day** (`0 4 * * *`), which is the most frequent schedule the Hobby plan allows (Hobby crons fire within an hour of the scheduled time). Pro/Enterprise may shorten it.
 - `CRON_SECRET` must be set in the environment for Vercel to send the bearer token the endpoint checks.
+- **Preview deployments** (pull requests) skip `db:migrate` so a branch can never alter the production schema; the build still succeeds. Set `MIGRATE_ON_PREVIEW=true` *and* preview-scoped database variables if you want previews to run migrations against a separate preview database. A preview without `DATABASE_URL` and the other required variables serves the plain-text "not configured" 503 page described above, which is expected.
 
 ## Deploying to Vercel + Supabase
 
