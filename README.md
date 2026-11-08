@@ -53,7 +53,7 @@ Supabase therefore only ever stores ciphertext and wrapped keys; SSNs, MFA secre
 | `TRUST_PROXY` | no | Read client IP from `X-Forwarded-For`. Defaults to `true` on Vercel. |
 | `NODE_ENV` | no | `production` on Vercel. |
 | `DB_POOL_MAX` | no | Connections per instance (default 2 on Vercel, 5 elsewhere). |
-| `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | no | Outgoing email for alerts and portal links. Without SMTP, messages are recorded in *Admin → Email outbox*. |
+| `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` | recommended | Outgoing email for alerts, portal links and account notifications. See *Email setup*. Without `SMTP_HOST`, messages are recorded in *Admin → Email outbox* only and Admin pages show a banner. |
 | `PORT` | no | Local dev port (default 3000). |
 | `TEST_DATABASE_URL` | tests | Postgres the test suite may create/drop throwaway databases in. |
 
@@ -109,13 +109,16 @@ Supabase therefore only ever stores ciphertext and wrapped keys; SSNs, MFA secre
 7. The dashboard opens. `/setup` is now permanently a 404 for everyone, and `/health` shows `setupOpen: false` with a note to remove the token.
 8. **Remove `BOOTSTRAP_TOKEN`** from Vercel (*Settings → Environment Variables → delete*) and redeploy. The route is already dead while a user exists; removing the variable is defence in depth.
 
+Staff you create afterwards (*Admin → Users*) receive a temporary password from you out of band; at their first sign-in they enroll two-factor and are then required to choose their own password before reaching anything else.
+
 Every step is recorded in the audit log (`setup.token_rejected`, `setup.token_accepted`, `setup.admin_created`, then the normal `auth.*` entries). If you abandon the flow after the account is created but before enrolling two-factor, sign in at `/login`; enrollment resumes there.
 
 ### What to test with fake data
 
 Use obviously fake values (names like "Test Taxpayer", SSNs such as `123-45-6789`, throwaway email addresses). Delete test clients afterwards from the client page (Admin only).
 
-1. **Users** — Admin → Users: create one Manager, one Preparer and one Intake user. Sign in as each in a private window; confirm each is forced through two-factor enrollment and that the Admin receives a *new device* alert (Admin → Alerts, and Admin → Email outbox if SMTP is not configured).
+1. **Users** — Admin → Users: create one Manager, one Preparer and one Intake user. Sign in as each in a private window; confirm each is forced through two-factor enrollment, then through a password change. Sign one of them in again from a second private window and confirm the Admin receives a *new device* alert (Admin → Alerts; the first login does not alert) and that acknowledging it clears the open count.
+1. **Email** — Admin → Settings → send a test email to yourself; confirm it arrives and shows as *sent* in Admin → Outbox. Change your own password from *My account* and confirm the notification email arrives and your other sessions are signed out.
 2. **Client record** — create a client with an SSN, date of birth, spouse and a dependent. Check: SSN shows masked everywhere; Admin "Reveal" works and appears in the audit trail; the Intake user sees no SSN digits, notes or fee history; the Preparer sees the client only after being assigned.
 3. **Edits and history** — change a phone number and add two year-history rows; confirm "years as client" updates and the audit trail lists the changed fields.
 4. **Documents** — upload a PDF and an image from the client page; open the document, upload a second version, and download both versions. Set a status to *Rejected* with a reason and confirm it is required. In Supabase → Storage → `vault`, confirm the stored objects are unreadable binaries.
@@ -131,7 +134,28 @@ Operational notes:
 - Back up the database with Supabase's backups and keep `APP_ENCRYPTION_KEY` with it; neither is useful without the other.
 - Rotating `SUPABASE_SERVICE_ROLE_KEY` or `SESSION_SECRET` is safe at any time (users may need to sign in again). Rotating `APP_ENCRYPTION_KEY` requires re-encrypting all data and is not supported in this build.
 
+## Email setup
+
+Email is used for security alerts to admins, portal magic links sent to clients, and account notifications (password changed). Messages never contain SSNs, dates of birth, passwords or document contents.
+
+Every message is written to the outbox (*Admin → Outbox*) with a status: **queued** (SMTP not configured), **sent**, or **failed** with the attempt count and the last SMTP error (credentials redacted). Delivery happens inline with an 8-second timeout per step, so a slow or down mail server never blocks the staff or client action that triggered it; failed rows can be retried from the outbox (Admin only, audited). *Admin → Settings* has a **Send test email** form that reports success or the exact SMTP error.
+
+Set these in Vercel (*Project → Settings → Environment Variables*, Production and Preview) and redeploy:
+
+| Variable | Gmail / Google Workspace | Generic provider (e.g. Postmark, SendGrid, Mailgun, Fastmail) |
+|---|---|---|
+| `SMTP_HOST` | `smtp.gmail.com` | from your provider, e.g. `smtp.postmarkapp.com` |
+| `SMTP_PORT` | `587` | `587` (STARTTLS) or `465` (implicit TLS) |
+| `SMTP_SECURE` | `false` | `false` for 587, `true` for 465 |
+| `SMTP_USER` | your full Google address | provider username / API token id |
+| `SMTP_PASS` | a **Google App Password** (Google Account → Security → 2-Step Verification → App passwords; requires 2-Step Verification on the account) — never your normal password | provider SMTP password / token |
+| `SMTP_FROM` | `"Taxonomy <you@yourfirm.com>"` (must be the same address or an alias of it) | a sender address verified with the provider |
+
+Then open *Admin → Settings*, send a test email to yourself, and check *Admin → Outbox* shows it as **sent**. `/health` reports `config.smtpConfigured` (true/false only, never the credentials). Google Workspace admins may need to allow "less secure"/SMTP access for the account or use SMTP relay instead; Gmail limits sending to roughly 500 messages per day.
+
 ## Local development
+
+Requires Node 22 (`.nvmrc` → `nvm use`; `package.json` pins `engines.node` to `22.x`, which Vercel honours).
 
 ```bash
 npm install
@@ -162,11 +186,12 @@ Bookkeeper exists for Build 3 (payments) and has no data access yet. The policy 
 
 ## Security design
 
-- Passwords: scrypt (N=2^15) with per-user salt; 12-char minimum; lockout for 15 min after 5 failures (counter stored on the user row); login/MFA/portal endpoints rate-limited per IP in the `rate_limits` table.
+- Passwords: scrypt (N=2^15) with per-user salt; 12-char minimum with letters and digits; a small common-password deny-list and no password containing the user's email; lockout for 15 min after 5 failures (counter stored on the user row); login/MFA/portal endpoints rate-limited per IP in the `rate_limits` table.
+- Password changes (*My account → Change password*) require the current password **and** a current authenticator code, end every other session for the user, are audited, and send a "Your password was changed" email. Users created by an admin, and users whose password an admin reset, carry a temporary password and are forced to the change screen at their next sign-in before anything else. *My account* also offers **Sign out of all other devices**.
 - Sessions: random 256-bit token stored hashed in Postgres; `HttpOnly`, `SameSite=Lax`, `Secure` cookies; idle timeout (admin-configurable) + 12-hour absolute lifetime; per-session CSRF token on every state-changing request.
 - MFA: RFC 6238 TOTP (secret encrypted at rest) + hashed one-time backup codes; a password-only session can reach nothing but the MFA step.
 - Revocation: deactivating a user deletes all their sessions immediately; every request re-checks the user is still active.
-- Alerts: a signed device cookie and the source IP are compared with the user's known devices/IPs; unknown ones create an alert in *Admin → Alerts* and email all admins.
+- Alerts: a signed device cookie and the source IP are compared with the user's known devices/IPs; unknown ones create an alert in *Admin → Alerts* and email all admins. A user's very first login only records the baseline device and does not alert. Alerts are acknowledged by an admin (who/when recorded and audited) and then leave the open count.
 - Encryption at rest: AES-256-GCM with per-record AAD for SSNs (client, spouse, dependents), MFA secrets and per-file data keys; files are encrypted end-to-end in the browser (see above).
 - Magic links: 256-bit tokens stored hashed, expire after a configurable number of hours (default 72), locked after 5 failed verifications, revocable by staff, shown to staff only once.
 - Headers: Helmet CSP (`default-src 'self'`, `connect-src` limited to the app and the Supabase project), no-referrer, `Cache-Control: no-store`, HSTS when HTTPS is enabled.
@@ -182,7 +207,7 @@ TEST_DATABASE_URL=postgres://postgres@127.0.0.1:5432/postgres npm test
 npm run typecheck
 ```
 
-Coverage: first-admin bootstrap (closed without token, wrong token 404 + audit + rate limit, forced TOTP enrollment with QR/manual key/backup codes, closed once a user exists), /health reachability without secrets, login + mandatory MFA + backup codes, idle timeout and its admin setting, new-device alerts, revocation, lockout, CSRF, SSN encryption/masking/reveal audit, role isolation, edit audit, years-as-client, dependents, the full encrypted upload protocol (init → PUT to signed URL → complete, tamper and ownership checks, versions, download grants), CSV and Excel import with mapping and failure reporting, returning-client and new-client portal flows, the Storage adapter, envelope-encryption invariants, RLS on every table, cross-instance sessions / lockouts / rate limits, and the cron cleanup.
+Coverage: SMTP delivery against an in-process fake server (sent, failed + retry, dropped connection, test email, not-configured fallback, credential redaction), password policy and step-up change (wrong current, wrong TOTP, weak/common/email, reuse, other sessions ended, notification email, forced change for admin-created and admin-reset users, sign out of all devices), first-admin bootstrap (closed without token, wrong token 404 + audit + rate limit, forced TOTP enrollment with QR/manual key/backup codes, closed once a user exists), /health reachability without secrets, login + mandatory MFA + backup codes, idle timeout and its admin setting, new-device alerts, revocation, lockout, CSRF, SSN encryption/masking/reveal audit, role isolation, edit audit, years-as-client, dependents, the full encrypted upload protocol (init → PUT to signed URL → complete, tamper and ownership checks, versions, download grants), CSV and Excel import with mapping and failure reporting, returning-client and new-client portal flows, the Storage adapter, envelope-encryption invariants, RLS on every table, cross-instance sessions / lockouts / rate limits, and the cron cleanup.
 
 ## Layout
 

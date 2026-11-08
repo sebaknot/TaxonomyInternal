@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import http from 'node:http';
+import net from 'node:net';
 import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import pg from 'pg';
@@ -160,7 +161,82 @@ export interface TestApp {
   close: () => Promise<void>;
 }
 
-export async function startTestApp(opts: { bootstrapToken?: string } = {}): Promise<TestApp> {
+/**
+ * Minimal in-process SMTP server (plain text, optional AUTH, no STARTTLS) for mailer tests.
+ * `mode` controls behaviour: 'ok' accepts everything; 'reject' answers 550 at RCPT; 'drop' closes the socket.
+ */
+export class FakeSmtpServer {
+  mode: 'ok' | 'reject' | 'drop' = 'ok';
+  messages: { from: string; to: string[]; data: string; authed: boolean }[] = [];
+  readonly user = 'smtp-user';
+  readonly pass = 'smtp-pass-secret';
+  server!: net.Server;
+  port = 0;
+  async start() {
+    this.server = net.createServer((sock) => this.handle(sock));
+    await new Promise<void>((r) => this.server.listen(0, '127.0.0.1', r));
+    this.port = (this.server.address() as AddressInfo).port;
+    return this;
+  }
+  async stop() {
+    await new Promise<void>((r) => this.server.close(() => r()));
+  }
+  private handle(sock: net.Socket) {
+    if (this.mode === 'drop') return sock.destroy();
+    let from = '';
+    const to: string[] = [];
+    let authed = false;
+    let inData = false;
+    let data = '';
+    let buf = '';
+    const reply = (s: string) => sock.write(s + '\r\n');
+    reply('220 fake-smtp ESMTP');
+    sock.on('data', (chunk) => {
+      buf += chunk.toString('utf8');
+      let idx: number;
+      while ((idx = buf.indexOf('\r\n')) >= 0) {
+        const line = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        if (inData) {
+          if (line === '.') {
+            inData = false;
+            this.messages.push({ from, to: [...to], data, authed });
+            data = '';
+            reply('250 OK queued');
+          } else data += line + '\n';
+          continue;
+        }
+        const up = line.toUpperCase();
+        if (up.startsWith('EHLO') || up.startsWith('HELO')) reply('250-fake-smtp\r\n250-AUTH PLAIN LOGIN\r\n250 8BITMIME');
+        else if (up.startsWith('AUTH PLAIN')) {
+          const [, , b64] = line.split(' ');
+          const [, u, p] = Buffer.from(b64 || '', 'base64').toString().split('\0');
+          authed = u === this.user && p === this.pass;
+          reply(authed ? '235 Authentication successful' : '535 Authentication credentials invalid');
+        } else if (up.startsWith('MAIL FROM')) {
+          from = line.slice(line.indexOf('<') + 1, line.indexOf('>'));
+          reply('250 OK');
+        } else if (up.startsWith('RCPT TO')) {
+          if (this.mode === 'reject') reply('550 5.1.1 Mailbox unavailable: recipient rejected');
+          else {
+            to.push(line.slice(line.indexOf('<') + 1, line.indexOf('>')));
+            reply('250 OK');
+          }
+        } else if (up === 'DATA') {
+          inData = true;
+          reply('354 End data with <CR><LF>.<CR><LF>');
+        } else if (up === 'QUIT') {
+          reply('221 Bye');
+          sock.end();
+        } else if (up === 'RSET' || up === 'NOOP') reply('250 OK');
+        else reply('500 Unrecognised command');
+      }
+    });
+    sock.on('error', () => {});
+  }
+}
+
+export async function startTestApp(opts: { bootstrapToken?: string; smtp?: FakeSmtpServer } = {}): Promise<TestApp> {
   const database = await createTestDatabase();
   const storageServer = await new FakeSupabaseStorageServer().start();
   const config: AppConfig = {
@@ -179,6 +255,7 @@ export async function startTestApp(opts: { bootstrapToken?: string } = {}): Prom
     cronSecret: 'cron-test-secret',
     bootstrapToken: opts.bootstrapToken,
     directDatabaseUrl: database.url,
+    smtp: opts.smtp ? { host: '127.0.0.1', port: opts.smtp.port, secure: false, user: opts.smtp.user, pass: opts.smtp.pass, from: 'Taxonomy <no-reply@taxonomy.test>' } : undefined,
   };
   const db = DB.fromUrl(config.databaseUrl, { max: config.dbPoolMax });
   await migrate(db);

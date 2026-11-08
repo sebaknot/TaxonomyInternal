@@ -18,7 +18,7 @@ export interface AppConfig {
   cronSecret?: string;
   /** One-time first-admin bootstrap token; remove from the environment after setup. */
   bootstrapToken?: string;
-  smtp?: { host: string; port: number; user?: string; pass?: string; from: string };
+  smtp?: { host: string; port: number; secure: boolean; user?: string; pass?: string; from: string };
 }
 
 /** Thrown when the environment is incomplete. `message` is safe to show: it names variables, never values. */
@@ -94,6 +94,8 @@ export function loadConfig(overrides: Partial<AppConfig> = {}): AppConfig {
       ? {
           host: smtpHost,
           port: Number(process.env.SMTP_PORT || 587),
+          // SMTP_SECURE=true means implicit TLS (port 465); otherwise STARTTLS is negotiated when offered.
+          secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === 'true' : Number(process.env.SMTP_PORT || 587) === 465,
           user: process.env.SMTP_USER || undefined,
           pass: process.env.SMTP_PASS || undefined,
           from: process.env.SMTP_FROM || 'no-reply@localhost',

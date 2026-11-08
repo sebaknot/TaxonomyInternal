@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "npm run vercel-build",
+  "buildCommand": "npm run build && npm run db:migrate",
   "framework": null,
   "functions": {
     "api/index.js": {

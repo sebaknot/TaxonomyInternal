@@ -19,6 +19,7 @@ export interface UserRow {
   revoked_at: string | null;
   failed_login_count: number;
   locked_until: string | null;
+  must_change_password: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -41,9 +42,27 @@ const MAX_FAILED_LOGINS = 5;
 const LOCKOUT_MINUTES = 15;
 const MIN_PASSWORD_LENGTH = 12;
 
-export function validatePasswordStrength(pw: string): string | null {
+/** Small deny-list of passwords that meet the length rule but are still trivially guessable. */
+export const COMMON_PASSWORDS = new Set(
+  [
+    'password1234', 'password12345', 'password123456', 'passw0rd1234', 'p@ssw0rd1234', 'qwerty123456', 'qwertyuiop123', '1234567890ab', '123456789012', '1q2w3e4r5t6y',
+    'abcdefghijk1', 'abcdefgh1234', 'iloveyou1234', 'welcome12345', 'welcome1234!', 'letmein12345', 'changeme1234', 'changeme2024', 'changeme2025', 'changeme2026',
+    'admin1234567', 'administrator1', 'taxonomy1234', 'taxonomy2024', 'taxonomy2025', 'taxonomy2026', 'taxes1234567', 'taxseason2026', 'temporary123', 'temppass1234',
+    'sunshine1234', 'princess1234', 'football1234', 'baseball1234', 'dragon123456', 'monkey123456', 'shadow123456', 'master123456', 'superman1234', 'trustno1trustno1',
+  ].map((p) => p.toLowerCase()),
+);
+
+export function validatePasswordStrength(pw: string, email?: string | null): string | null {
   if (pw.length < MIN_PASSWORD_LENGTH) return `Password must be at least ${MIN_PASSWORD_LENGTH} characters.`;
   if (!/[A-Za-z]/.test(pw) || !/[0-9]/.test(pw)) return 'Password must contain letters and numbers.';
+  const lower = pw.toLowerCase();
+  if (COMMON_PASSWORDS.has(lower) || COMMON_PASSWORDS.has(lower.replace(/[^a-z0-9]/g, ''))) return 'That password is too common. Choose something less guessable.';
+  if (email) {
+    const e = email.toLowerCase().trim();
+    const local = e.split('@')[0];
+    if (e && lower.includes(e)) return 'Password must not contain your email address.';
+    if (local.length >= 5 && lower.includes(local)) return 'Password must not contain your email address.';
+  }
   return null;
 }
 
@@ -63,11 +82,13 @@ export function listActiveUsersByRole(ctx: AppContext, roles: Role[]) {
 }
 
 export async function createUser(ctx: AppContext, input: { email: string; name: string; role: Role; password: string }, actor?: SessionUser | null): Promise<UserRow> {
-  const pwErr = validatePasswordStrength(input.password);
+  const pwErr = validatePasswordStrength(input.password, input.email);
   if (pwErr) throw new Error(pwErr);
   if (await getUserByEmail(ctx, input.email)) throw new Error('A user with that email already exists.');
   const id = newId();
-  await ctx.db.run('INSERT INTO users (id, email, name, role, password_hash) VALUES (?, ?, ?, ?, ?)', id, input.email.trim().toLowerCase(), input.name.trim(), input.role, hashPassword(input.password));
+  // A temporary password handed out by an admin must be replaced at first sign-in.
+  const mustChange = !!actor;
+  await ctx.db.run('INSERT INTO users (id, email, name, role, password_hash, must_change_password) VALUES (?, ?, ?, ?, ?, ?)', id, input.email.trim().toLowerCase(), input.name.trim(), input.role, hashPassword(input.password), mustChange);
   await audit(ctx, {
     actorType: actor ? 'user' : 'system',
     actorId: actor?.id,
@@ -87,15 +108,60 @@ export async function updateUser(ctx: AppContext, id: string, patch: { name?: st
   await audit(ctx, { actorType: 'user', actorId: actor.id, actorLabel: actor.email, action: 'user.update', entityType: 'user', entityId: id, details: patch });
 }
 
+/** Admin/CLI password reset: temporary password, all sessions ended, change forced at next sign-in. */
 export async function setUserPassword(ctx: AppContext, id: string, password: string, actor: SessionUser | null) {
-  const pwErr = validatePasswordStrength(password);
+  const target = await getUserById(ctx, id);
+  if (!target) throw new Error('User not found');
+  const pwErr = validatePasswordStrength(password, target.email);
   if (pwErr) throw new Error(pwErr);
   await ctx.db.tx(async (t) => {
-    await t.run('UPDATE users SET password_hash = ?, updated_at = now() WHERE id = ?', hashPassword(password), id);
-    // Password change invalidates all sessions for that user.
+    await t.run('UPDATE users SET password_hash = ?, must_change_password = true, updated_at = now() WHERE id = ?', hashPassword(password), id);
     await t.run('DELETE FROM sessions WHERE user_id = ?', id);
   });
   await audit(ctx, { actorType: actor ? 'user' : 'system', actorId: actor?.id, actorLabel: actor?.email ?? 'cli', action: 'user.password_reset', entityType: 'user', entityId: id });
+}
+
+/**
+ * Self-service password change with step-up: current password AND a current TOTP code.
+ * Keeps the calling session, ends every other session, audits, and notifies the user by email.
+ */
+export async function changeOwnPassword(
+  ctx: AppContext,
+  user: UserRow,
+  session: SessionRow,
+  input: { current: string; password: string; confirm: string; totp: string },
+  meta: RequestMeta,
+): Promise<void> {
+  if (!verifyPassword(input.current, user.password_hash)) {
+    await audit(ctx, { actorType: 'user', actorId: user.id, actorLabel: user.email, action: 'user.password_change_failed', entityType: 'user', entityId: user.id, details: { reason: 'wrong_current_password' }, ip: meta.ip, userAgent: meta.userAgent });
+    throw new Error('Current password is incorrect.');
+  }
+  const secret = getMfaSecret(ctx, user);
+  if (!user.mfa_enabled || !secret || !verifyTotp(secret, input.totp)) {
+    await audit(ctx, { actorType: 'user', actorId: user.id, actorLabel: user.email, action: 'user.password_change_failed', entityType: 'user', entityId: user.id, details: { reason: 'wrong_totp' }, ip: meta.ip, userAgent: meta.userAgent });
+    throw new Error('The authenticator code is not valid.');
+  }
+  if (input.password !== input.confirm) throw new Error('New passwords do not match.');
+  const weak = validatePasswordStrength(input.password, user.email);
+  if (weak) throw new Error(weak);
+  if (verifyPassword(input.password, user.password_hash)) throw new Error('Choose a password you have not used before.');
+  const others = await ctx.db.tx(async (t) => {
+    await t.run('UPDATE users SET password_hash = ?, must_change_password = false, updated_at = now() WHERE id = ?', hashPassword(input.password), user.id);
+    return t.run('DELETE FROM sessions WHERE user_id = ? AND id <> ?', user.id, session.id);
+  });
+  await audit(ctx, { actorType: 'user', actorId: user.id, actorLabel: user.email, action: 'user.password_changed', entityType: 'user', entityId: user.id, details: { other_sessions_ended: others, forced: user.must_change_password }, ip: meta.ip, userAgent: meta.userAgent });
+  await ctx.mailer.send(
+    user.email,
+    `[Taxonomy] Your password was changed`,
+    `Hello ${user.name},\n\nThe password for your Taxonomy staff account was changed on ${new Date().toUTCString()} from IP ${meta.ip || 'unknown'}. All other signed-in sessions were ended.\n\nIf you did not do this, contact an administrator immediately so your access can be revoked.\n\nTaxonomy`,
+  );
+}
+
+/** "Sign out of all devices": ends every session for the user except the current one. */
+export async function revokeOtherSessions(ctx: AppContext, user: UserRow, session: SessionRow, meta: RequestMeta): Promise<number> {
+  const n = await ctx.db.run('DELETE FROM sessions WHERE user_id = ? AND id <> ?', user.id, session.id);
+  await audit(ctx, { actorType: 'user', actorId: user.id, actorLabel: user.email, action: 'auth.other_sessions_revoked', entityType: 'user', entityId: user.id, details: { sessions_ended: n }, ip: meta.ip, userAgent: meta.userAgent });
+  return n;
 }
 
 /** Instantly revoke one user's access: deactivates the account and kills every live session. */
@@ -252,11 +318,13 @@ export async function completeLogin(ctx: AppContext, sessionId: string, user: Us
     if (inserted === 1) alerts.push('new_location');
     else await ctx.db.run('UPDATE user_locations SET last_seen_at = now() WHERE user_id = ? AND ip = ?', user.id, meta.ip);
   }
+  // The very first login necessarily comes from an unknown device and IP; it is recorded as the
+  // baseline but does not raise an alert.
   const loginCount = await ctx.db.scalar<number>("SELECT COUNT(*) FROM audit_log WHERE actor_id = ? AND action = 'auth.login'", user.id);
   const isFirstLogin = loginCount <= 1;
-  if (alerts.length) {
-    const message = `${user.name} (${user.email}) logged in from ${alerts.includes('new_device') ? 'a new device' : ''}${alerts.length === 2 ? ' and ' : ''}${alerts.includes('new_location') ? 'an unrecognized location (IP ' + meta.ip + ')' : ''}${isFirstLogin ? ' [first login]' : ''}`;
-    await raiseAdminAlert(ctx, 'login_new_device_or_location', message, { userId: user.id, alerts, ip: meta.ip, userAgent: meta.userAgent, firstLogin: isFirstLogin }, user.id);
+  if (alerts.length && !isFirstLogin) {
+    const message = `${user.name} (${user.email}) logged in from ${alerts.includes('new_device') ? 'a new device' : ''}${alerts.length === 2 ? ' and ' : ''}${alerts.includes('new_location') ? 'an unrecognized location (IP ' + meta.ip + ')' : ''}`;
+    await raiseAdminAlert(ctx, 'login_new_device_or_location', message, { userId: user.id, alerts, ip: meta.ip, userAgent: meta.userAgent }, user.id);
   }
 }
 

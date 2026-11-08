@@ -2,8 +2,7 @@ import { Router } from 'express';
 import QRCode from 'qrcode';
 import { z } from 'zod';
 import type { AppContext } from '../context.js';
-import { loginWithPassword, beginMfaEnrollment, completeMfaEnrollment, verifyMfaCode, completeLogin, logout, getMfaSecret, setUserPassword, getUserById } from '../services/auth.js';
-import { verifyPassword } from '../lib/crypto.js';
+import { loginWithPassword, beginMfaEnrollment, completeMfaEnrollment, verifyMfaCode, completeLogin, logout, getMfaSecret, getUserById, changeOwnPassword, revokeOtherSessions } from '../services/auth.js';
 import { otpauthUrl } from '../lib/totp.js';
 import { STAFF_COOKIE, cookieOptions, requireAuth, wrap } from '../middleware/index.js';
 import { dbRateLimit } from '../middleware/rateLimit.js';
@@ -103,23 +102,40 @@ export function authRouter(ctx: AppContext) {
     }),
   );
 
-  r.get('/account', requireAuth, (_req, res) => res.render('auth/account', { title: 'My account', error: null }));
+  r.get(
+    '/account',
+    requireAuth,
+    wrap(async (req, res) => {
+      const sessions = await req.ctx.db.scalar<number>('SELECT COUNT(*) FROM sessions WHERE user_id = ? AND mfa_passed = true', req.user!.id);
+      res.render('auth/account', { title: 'My account', sessions });
+    }),
+  );
+  r.get('/account/password', requireAuth, (req, res) => {
+    res.render('auth/password', { title: 'Change password', error: null, forced: !!req.staffUser?.must_change_password });
+  });
   r.post(
     '/account/password',
     requireAuth,
+    mfaLimit,
     wrap(async (req, res) => {
       const u = (await getUserById(req.ctx, req.user!.id))!;
-      const { current, password, confirm } = req.body as Record<string, string>;
-      if (!verifyPassword(String(current || ''), u.password_hash)) return res.status(400).render('auth/account', { title: 'My account', error: 'Current password is incorrect.' });
-      if (password !== confirm) return res.status(400).render('auth/account', { title: 'My account', error: 'New passwords do not match.' });
+      const b = req.body as Record<string, string>;
       try {
-        await setUserPassword(req.ctx, u.id, String(password), req.user!);
+        await changeOwnPassword(req.ctx, u, req.staffSession!, { current: String(b.current || ''), password: String(b.password || ''), confirm: String(b.confirm || ''), totp: String(b.totp || '') }, req.meta);
       } catch (err) {
-        return res.status(400).render('auth/account', { title: 'My account', error: (err as Error).message });
+        return res.status(400).render('auth/password', { title: 'Change password', error: (err as Error).message, forced: !!u.must_change_password });
       }
-      res.clearCookie(STAFF_COOKIE, { path: '/' });
-      req.flash('success', 'Password changed. Please sign in again.');
-      res.redirect('/login');
+      req.flash('success', 'Password changed. All other sessions were signed out and a confirmation email was sent.');
+      res.redirect('/account');
+    }),
+  );
+  r.post(
+    '/account/sessions/revoke-others',
+    requireAuth,
+    wrap(async (req, res) => {
+      const n = await revokeOtherSessions(req.ctx, req.staffUser!, req.staffSession!, req.meta);
+      req.flash('success', n ? `Signed out of ${n} other session${n === 1 ? '' : 's'}.` : 'No other sessions were active.');
+      res.redirect('/account');
     }),
   );
 

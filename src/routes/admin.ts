@@ -131,7 +131,13 @@ export function adminRouter() {
     '/alerts/:id/ack',
     wrap(async (req, res) => {
       const id = String(req.params.id);
-      if (UUID.test(id)) await req.ctx.db.run('UPDATE admin_alerts SET acknowledged_at = now(), acknowledged_by = ? WHERE id = ? AND acknowledged_at IS NULL', req.user!.email, id);
+      if (UUID.test(id)) {
+        const n = await req.ctx.db.run('UPDATE admin_alerts SET acknowledged_at = now(), acknowledged_by = ? WHERE id = ? AND acknowledged_at IS NULL', req.user!.email, id);
+        if (n) {
+          await audit(req.ctx, { actorType: 'user', actorId: req.user!.id, actorLabel: req.user!.email, action: 'alert.acknowledge', entityType: 'alert', entityId: id, ip: req.meta.ip });
+          req.flash('success', 'Alert acknowledged.');
+        }
+      }
       res.redirect('/admin/alerts');
     }),
   );
@@ -169,6 +175,22 @@ export function adminRouter() {
     }),
   );
 
+  r.post(
+    '/settings/test-email',
+    wrap(async (req, res) => {
+      const parsed = z.object({ to: z.string().trim().email().max(200) }).safeParse(req.body);
+      if (!parsed.success) {
+        req.flash('error', 'Enter a valid email address.');
+        return res.redirect('/admin/settings');
+      }
+      const result = await req.ctx.mailer.sendTest(parsed.data.to);
+      await audit(req.ctx, { actorType: 'user', actorId: req.user!.id, actorLabel: req.user!.email, action: 'email.test', entityType: 'email', details: { to: parsed.data.to, ok: result.ok, error: result.error }, ip: req.meta.ip });
+      if (result.ok) req.flash('success', `Test email sent to ${parsed.data.to}.`);
+      else req.flash('error', `Test email failed: ${result.error}`);
+      res.redirect('/admin/settings');
+    }),
+  );
+
   // ----- Tags -----
   r.get(
     '/tags',
@@ -187,8 +209,25 @@ export function adminRouter() {
   r.get(
     '/outbox',
     wrap(async (req, res) => {
-      const emails = await req.ctx.db.all('SELECT id, ts, to_addr, subject, sent_at, error FROM email_outbox ORDER BY ts DESC LIMIT 200');
-      res.render('admin/outbox', { title: 'Email outbox', emails, smtpConfigured: !!req.ctx.config.smtp });
+      const emails = await req.ctx.db.all('SELECT id, ts, to_addr, subject, status, attempts, last_error, sent_at FROM email_outbox ORDER BY ts DESC LIMIT 200');
+      res.render('admin/outbox', { title: 'Email outbox', emails });
+    }),
+  );
+  r.post(
+    '/outbox/:id/retry',
+    wrap(async (req, res, next) => {
+      const id = String(req.params.id);
+      const row = UUID.test(id) ? await req.ctx.db.one<{ status: string; to_addr: string }>('SELECT status, to_addr FROM email_outbox WHERE id = ?', id) : undefined;
+      if (!row) return next(new HttpError(404, 'Not found'));
+      if (row.status === 'sent') {
+        req.flash('info', 'That message was already delivered.');
+        return res.redirect('/admin/outbox');
+      }
+      const result = await req.ctx.mailer.retry(id);
+      await audit(req.ctx, { actorType: 'user', actorId: req.user!.id, actorLabel: req.user!.email, action: 'email.retry', entityType: 'email', entityId: id, details: { to: row.to_addr, status: result.status, error: result.error }, ip: req.meta.ip });
+      if (result.status === 'sent') req.flash('success', `Delivered to ${row.to_addr}.`);
+      else req.flash('error', result.status === 'queued' ? 'Email is not configured; the message stays queued.' : `Delivery failed again: ${result.error}`);
+      res.redirect('/admin/outbox');
     }),
   );
   r.get(

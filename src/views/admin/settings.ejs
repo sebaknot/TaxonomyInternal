@@ -9,4 +9,12 @@
   <label>Current tax year (default for uploads and links)</label><input type="number" name="current_tax_year" min="2000" max="2100" value="<%= values.current_tax_year %>" required>
   <p><button type="submit">Save settings</button></p>
 </form>
+<h2>Email</h2>
+<% if (!smtpConfigured) { %><div class="flash error">Email is not configured — messages are not being delivered. Set SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS and SMTP_FROM in the environment (see README → Email setup).</div><% } %>
+<form method="post" action="/admin/settings/test-email" class="row" style="max-width:520px">
+  <input type="hidden" name="_csrf" value="<%= csrfToken %>">
+  <div><label>Send a test email to</label><input type="email" name="to" required value="<%= user.email %>"></div>
+  <div><button type="submit" <%= smtpConfigured ? '' : 'disabled' %>>Send test email</button></div>
+</form>
+<p class="muted">The result (success or the exact SMTP error) is shown at the top of this page after sending.</p>
 <%- include('../partials/foot') %>
